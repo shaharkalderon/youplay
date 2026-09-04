@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { downloadExport, parseImport } from '../lib/transfer.ts'
 import { importItems, type LibraryItem } from '../lib/store.ts'
+import type { Account } from '../lib/session.ts'
+import { SyncPanel } from './SyncPanel'
 
 type Props = {
   open: boolean
   onClose: () => void
   items: LibraryItem[]
+  account: Account
 }
 
 type Status = { tone: 'ok' | 'error'; message: string } | null
 
-export function DataDialog({ open, onClose, items }: Props) {
+export function DataDialog({ open, onClose, items, account }: Props) {
   const ref = useRef<HTMLDialogElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const [status, setStatus] = useState<Status>(null)
@@ -74,9 +77,13 @@ export function DataDialog({ open, onClose, items }: Props) {
     >
       <div className="sheet-body">
         <h2>Library data</h2>
+
+        <SyncPanel account={account} />
+
+        <hr className="sheet-divider" />
         <p>
-          Your library lives in this browser only. Export it to keep a copy, move to
-          another device, or restore after clearing site data.
+          Export a copy to keep as a backup, move to another device by hand, or
+          restore after clearing site data.
         </p>
 
         <div className="data-actions">

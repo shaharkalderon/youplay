@@ -9,6 +9,7 @@ import { SortControl } from './components/SortControl'
 import { DEFAULT_FILTER, FILTERS, findFilter } from './lib/filters.ts'
 import { parseLink } from './lib/links.ts'
 import { setFilterId, useFilterId, useLayout, useSortOrder } from './lib/preferences.ts'
+import { useAccount } from './lib/session.ts'
 import { sortItems } from './lib/sort.ts'
 import { clearShareParams, readSharedLink } from './lib/share.ts'
 import {
@@ -25,6 +26,7 @@ type Toast = { message: string; tone: 'ok' | 'error' } | null
 export default function App() {
   const items = useLibrary()
   const layout = useLayout()
+  const { account } = useAccount()
   const sortOrder = useSortOrder()
   const [query, setQuery] = useState('')
   const filterId = useFilterId()
@@ -232,7 +234,12 @@ export default function App() {
 
       <AddDialog open={dialogOpen} onClose={() => setDialogOpen(false)} onAdd={handleAdd} />
 
-      <DataDialog open={dataOpen} onClose={() => setDataOpen(false)} items={items} />
+      <DataDialog
+        open={dataOpen}
+        onClose={() => setDataOpen(false)}
+        items={items}
+        account={account}
+      />
 
       {toast && (
         <div className={`toast ${toast.tone === 'error' ? 'error' : ''}`} role="status">

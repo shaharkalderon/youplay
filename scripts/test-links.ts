@@ -5,6 +5,7 @@ import { relativeTime } from '../src/lib/time.ts'
 import { sortItems } from '../src/lib/sort.ts'
 import { buildExport, exportFilename, parseImport } from '../src/lib/transfer.ts'
 import { DEFAULT_FILTER, FILTERS, findFilter, isFilterId } from '../src/lib/filters.ts'
+import { mergeItems, pruneTombstones, liveItems, TOMBSTONE_TTL_MS } from '../src/lib/sync.ts'
 
 let passed = 0
 const check = (name: string, fn: () => void) => {
@@ -291,6 +292,99 @@ check('only known filter ids are accepted from storage', () => {
 // An unknown id must not blow up the render; it falls back to the first filter.
 check('findFilter falls back for unknown ids', () => {
   assert.equal(findFilter('nope' as never).id, 'all')
+})
+
+// --- sync merge ---
+const T = 1_700_000_000_000
+const entry = (key: string, over: Record<string, unknown> = {}) =>
+  ({
+    ...libraryItem,
+    key,
+    addedAt: T,
+    updatedAt: T,
+    watchedAt: null,
+    deletedAt: null,
+    resolved: true,
+    ...over,
+  }) as never
+
+const byKey = (items: readonly unknown[]) =>
+  Object.fromEntries((items as { key: string }[]).map((i) => [i.key, i]))
+
+check('merge unions items from both devices', () => {
+  const merged = mergeItems([entry('a')], [entry('b')])
+  assert.deepEqual(new Set(merged.map((i) => i.key)), new Set(['a', 'b']))
+})
+
+check('the newer edit wins', () => {
+  const merged = mergeItems(
+    [entry('a', { updatedAt: T + 100, watchedAt: T + 100 })],
+    [entry('a', { updatedAt: T, watchedAt: null })]
+  )
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0].watchedAt, T + 100)
+})
+
+// The whole reason tombstones exist.
+check('a delete is not resurrected by a stale copy', () => {
+  const deleted = entry('a', { updatedAt: T + 100, deletedAt: T + 100 })
+  const stale = entry('a', { updatedAt: T })
+  assert.equal(mergeItems([deleted], [stale])[0].deletedAt, T + 100)
+  assert.equal(mergeItems([stale], [deleted])[0].deletedAt, T + 100)
+  assert.equal(liveItems(mergeItems([stale], [deleted])).length, 0)
+})
+
+check('re-adding after a delete wins on recency', () => {
+  const deleted = entry('a', { updatedAt: T, deletedAt: T })
+  const readded = entry('a', { updatedAt: T + 500, deletedAt: null })
+  assert.equal(mergeItems([deleted], [readded])[0].deletedAt, null)
+})
+
+// Order must not matter, or two devices reach different states from one merge.
+check('merge is commutative', () => {
+  const left = [entry('a', { updatedAt: T + 1 }), entry('b', { deletedAt: T, updatedAt: T })]
+  const right = [entry('a', { updatedAt: T }), entry('c')]
+  assert.deepEqual(byKey(mergeItems(left, right)), byKey(mergeItems(right, left)))
+})
+
+check('a tie is broken deterministically, deletion first', () => {
+  const kept = entry('a', { updatedAt: T })
+  const gone = entry('a', { updatedAt: T, deletedAt: T })
+  assert.equal(mergeItems([kept], [gone])[0].deletedAt, T)
+  assert.equal(mergeItems([gone], [kept])[0].deletedAt, T)
+})
+
+check('addedAt keeps the earliest save', () => {
+  const merged = mergeItems(
+    [entry('a', { addedAt: T + 5000, updatedAt: T + 5000 })],
+    [entry('a', { addedAt: T, updatedAt: T })]
+  )
+  assert.equal(merged[0].addedAt, T)
+})
+
+// Metadata is a cache, so a placeholder must not overwrite a resolved title.
+check('resolved metadata survives against an unresolved winner', () => {
+  const merged = mergeItems(
+    [entry('a', { updatedAt: T + 100, resolved: false, title: 'video · abc', thumbnail: null })],
+    [entry('a', { updatedAt: T, resolved: true, title: 'Real Title', thumbnail: 'https://x/y.jpg' })]
+  )
+  assert.equal(merged[0].title, 'Real Title')
+  assert.equal(merged[0].thumbnail, 'https://x/y.jpg')
+  assert.equal(merged[0].resolved, true)
+})
+
+check('merging a library with itself changes nothing', () => {
+  const lib = [entry('a'), entry('b', { deletedAt: T })]
+  assert.deepEqual(byKey(mergeItems(lib, lib)), byKey(lib))
+})
+
+check('old tombstones are pruned, live items never are', () => {
+  const now = T + TOMBSTONE_TTL_MS + 1
+  const kept = pruneTombstones(
+    [entry('live'), entry('fresh', { deletedAt: now - 1000 }), entry('old', { deletedAt: T })],
+    now
+  )
+  assert.deepEqual(new Set(kept.map((i) => i.key)), new Set(['live', 'fresh']))
 })
 
 console.log(`${passed} checks passed`)

@@ -21,7 +21,9 @@ export function buildExport(items: LibraryItem[], now = new Date()): ExportFile 
     app: 'youplay',
     version: EXPORT_VERSION,
     exportedAt: now.toISOString(),
-    items,
+    // Deleted items are excluded: a backup should restore your library, not
+    // its history of removals.
+    items: items.filter((item) => !item.deletedAt),
   }
 }
 
@@ -109,6 +111,10 @@ export function parseImport(text: string): ImportOutcome {
       thumbnail,
       addedAt: safeTimestamp(record.addedAt),
       watchedAt: safeWatchedAt(record.watchedAt),
+      updatedAt: safeTimestamp(record.updatedAt),
+      // An import brings items in as live entries; tombstones are a sync
+      // concern and a backup file should not carry ghosts back.
+      deletedAt: null,
       // Anything without real metadata is re-fetched after the import.
       resolved: Boolean(title) && Boolean(thumbnail),
       resolving: false,

@@ -45,7 +45,7 @@ npm install && npm run dev
 | `npm run dev` | Dev server on :5173 |
 | `npm run build` | Typecheck + production build to `dist/` |
 | `npm run preview` | Serve the built output |
-| `npm test` | Parser, time, sort, transfer, watched and filter checks (48 cases) |
+| `npm test` | Parser, time, sort, transfer, watched, filter and merge checks (58 cases) |
 | `npm run icons` | Regenerate PWA icons |
 
 ## Getting links in
@@ -146,6 +146,48 @@ exactly when it was needed. Delegating to the platforms' own https handoff is
 both simpler and better tested, and its worst case is a working web player
 rather than nothing.
 
+## Sync across devices
+
+Optional, and off until you configure it. Without credentials the app is
+local-only and the sync panel says so; nothing else changes.
+
+Sync is **merge-based**, not last-device-wins, so two devices that were both
+edited while apart reconcile rather than one clobbering the other:
+
+- Every change stamps `updatedAt`; the newer edit wins per item.
+- Deletes leave **tombstones**. Without them a delete on one device is silently
+  undone by the next device that syncs an older copy back — the deletion looks
+  like it "didn't take". Tombstones are pruned after 90 days.
+- `addedAt` keeps the earlier value: when you first saved a link is a fact about
+  the past, not something a later sync should rewrite.
+- Metadata is treated as a cache, not intent — a placeholder title never
+  overwrites one that resolved on another device.
+- The merge is commutative, so it does not matter which device syncs first.
+
+It runs on sign-in, on tab focus, and every five minutes.
+
+### Setting it up
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. In **SQL Editor**, run [`supabase-setup.sql`](supabase-setup.sql). It creates
+   the table and the row-level-security policies that scope every row to its
+   owner.
+3. In **Authentication → URL Configuration**, set the Site URL and add a
+   redirect URL of `https://shaharkalderon.github.io/youplay/`, or the magic
+   link will bounce you somewhere else.
+4. From **Project Settings → API**, copy the project URL and the `anon` key.
+5. Add them to the repo under **Settings → Secrets and variables → Actions →
+   Variables** as `SUPABASE_URL` and `SUPABASE_ANON_KEY`, then re-run the
+   deploy workflow.
+
+For local development, copy `.env.example` to `.env` and fill in the same two
+values.
+
+Both values are safe to publish. The `anon` key is designed to ship in client
+code; it grants only what the row-level-security policies allow, which is your
+own row and nothing else. It is not a service key — never put the `service_role`
+key in this app.
+
 ## Export and import
 
 The download icon in the header opens **Library data**.
@@ -186,8 +228,8 @@ the rest is filled in from oEmbed on import.
 - The service worker registers and activates on the live site, scoped to
   `/youplay/`. It does **not** register over plain `http://localhost` in some
   embedded browsers — that is an environment limit, not a code problem.
-- The library is per-device. There is no sync — export/import is the manual
-  substitute.
+- Sync is optional and must be configured; until then the library is per-device
+  and export/import is the manual substitute.
 
 ## Layout
 
@@ -201,6 +243,10 @@ src/lib/filters.ts    filter definitions + predicates (pure, tested)
 src/lib/preferences.ts  localStorage-backed layout and sort stores
 src/lib/time.ts       relative + absolute timestamps
 src/lib/transfer.ts   export envelope + defensive import parsing
+src/lib/sync.ts       merge, tombstones, pruning (pure, tested)
+src/lib/remote.ts     pull / merge / push against Supabase
+src/lib/session.ts    sign-in state and sync scheduling
+src/lib/supabase.ts   lazily loaded client, config detection
 src/lib/share.ts      share-target / ?link= intake
 src/lib/open.ts       hand-off back to YouTube / Spotify
 scripts/make-icons.mjs  dependency-free PNG icon generator

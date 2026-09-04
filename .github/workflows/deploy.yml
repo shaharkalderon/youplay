@@ -29,7 +29,14 @@ jobs:
 
       - run: npm ci
       - run: npm test
+
       - run: npm run build
+        env:
+          # Optional: without these the site builds local-only, no sync UI.
+          # Repository variables are the natural home (both values are public by
+          # design), but secrets are accepted too.
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL || secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY || secrets.SUPABASE_ANON_KEY }}
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

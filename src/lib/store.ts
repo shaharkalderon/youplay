@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import type { ParsedLink } from './links.ts'
 import { dedupeKey } from './links.ts'
 import { fetchMetadata, placeholderMetadata } from './metadata.ts'
+import { liveItems, pruneTombstones } from './sync.ts'
 
 export type LibraryItem = ParsedLink & {
   key: string
@@ -15,6 +16,13 @@ export type LibraryItem = ParsedLink & {
    * "recently watched" view has something to sort on.
    */
   watchedAt: number | null
+  /** Stamped on every local mutation; drives last-write-wins when syncing. */
+  updatedAt: number
+  /**
+   * Soft delete. Removals have to survive as tombstones, or a delete on one
+   * device is undone by the next device that syncs an older copy back.
+   */
+  deletedAt: number | null
   /** True once oEmbed has actually answered; false means we are showing a placeholder. */
   resolved: boolean
   /** True while a lookup is in flight, so the card can show a loading hint. */
@@ -33,12 +41,15 @@ function load(): LibraryItem[] {
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
     // A lookup that was in flight when the tab closed is not "in flight" now.
-    // `watchedAt` is backfilled for libraries saved before the field existed.
-    return parsed.map((item: LibraryItem) => ({
+    // The sync fields are backfilled for libraries saved before they existed.
+    const restored = parsed.map((item: LibraryItem) => ({
       ...item,
       watchedAt: item.watchedAt ?? null,
+      updatedAt: item.updatedAt ?? item.addedAt ?? Date.now(),
+      deletedAt: item.deletedAt ?? null,
       resolving: false,
     }))
+    return pruneTombstones(restored)
   } catch {
     return []
   }
@@ -59,13 +70,36 @@ const subscribe = (fn: () => void) => {
   return () => listeners.delete(fn)
 }
 
+/** The live library, without tombstones — this is what the UI renders. */
 export function useLibrary(): LibraryItem[] {
-  return useSyncExternalStore(subscribe, () => items, () => items)
+  return useSyncExternalStore(subscribe, getItems, getItems)
 }
 
-export const getItems = () => items
+let liveCache: LibraryItem[] = liveItems(items)
+let liveCacheSource: LibraryItem[] = items
 
-export const has = (link: ParsedLink) => items.some((item) => item.key === dedupeKey(link))
+/** Memoised so useSyncExternalStore does not see a new array every render. */
+export function getItems(): LibraryItem[] {
+  if (liveCacheSource !== items) {
+    liveCacheSource = items
+    liveCache = liveItems(items)
+  }
+  return liveCache
+}
+
+/** Everything, tombstones included — for sync and merging only. */
+export const getAllItems = () => items
+
+/** Applies a merged library wholesale. Used by sync, which has already
+ *  reconciled local and remote state. */
+export function replaceAll(next: LibraryItem[]) {
+  commit(next)
+  // A merge can bring in items from another device that never resolved there.
+  retryUnresolved()
+}
+
+export const has = (link: ParsedLink) =>
+  getItems().some((item) => item.key === dedupeKey(link))
 
 /**
  * Adds a link immediately with placeholder text, then fills in the real title
@@ -74,18 +108,24 @@ export const has = (link: ParsedLink) => items.some((item) => item.key === dedup
  */
 export function addLink(link: ParsedLink): LibraryItem | null {
   const key = dedupeKey(link)
-  if (items.some((item) => item.key === key)) return null
+  const existing = items.find((item) => item.key === key)
+  // A live entry is a duplicate; a tombstone means this link was deleted before
+  // and is being saved again, which should bring it back rather than no-op.
+  if (existing && !existing.deletedAt) return null
 
+  const now = Date.now()
   const item: LibraryItem = {
     ...link,
     key,
     ...placeholderMetadata(link),
-    addedAt: Date.now(),
+    addedAt: now,
     watchedAt: null,
+    updatedAt: now,
+    deletedAt: null,
     resolved: false,
     resolving: true,
   }
-  commit([item, ...items])
+  commit([item, ...items.filter((entry) => entry.key !== key)])
   void resolve(item)
   return item
 }
@@ -99,11 +139,16 @@ async function resolve(item: LibraryItem) {
   }
 }
 
-function patch(key: string, changes: Partial<LibraryItem>) {
+/**
+ * `touch` marks a change as user intent, which is what sync reconciles on.
+ * Metadata arriving from oEmbed is not intent — it is a cache fill — so it must
+ * not bump `updatedAt` and win a merge against a real edit on another device.
+ */
+function patch(key: string, changes: Partial<LibraryItem>, touch = false) {
   const index = items.findIndex((item) => item.key === key)
   if (index === -1) return
   const next = items.slice()
-  next[index] = { ...next[index], ...changes }
+  next[index] = { ...next[index], ...changes, ...(touch ? { updatedAt: Date.now() } : {}) }
   commit(next)
 }
 
@@ -113,11 +158,12 @@ function patch(key: string, changes: Partial<LibraryItem>) {
  * so importing the same file twice is a no-op rather than a duplicate pile.
  */
 export function importItems(incoming: LibraryItem[]): { added: number; duplicates: number } {
-  const existing = new Set(items.map((item) => item.key))
+  const existing = new Set(getItems().map((item) => item.key))
   const fresh = incoming.filter((item) => !existing.has(item.key))
 
   if (fresh.length > 0) {
-    commit([...fresh, ...items])
+    const revived = new Set(fresh.map((item) => item.key))
+    commit([...fresh, ...items.filter((item) => !revived.has(item.key))])
     // Imported rows may carry no metadata; fill them in like any other add.
     retryUnresolved()
   }
@@ -132,8 +178,10 @@ export function toggleWatched(key: string) {
   patch(key, { watchedAt: item.watchedAt ? null : Date.now() })
 }
 
+/** Soft delete: the tombstone is what lets the removal survive a sync. */
 export function removeItem(key: string) {
-  commit(items.filter((item) => item.key !== key))
+  const now = Date.now()
+  patch(key, { deletedAt: now, updatedAt: now })
 }
 
 /**
@@ -142,7 +190,7 @@ export function removeItem(key: string) {
  * kills the in-flight lookup — so unresolved items are retried on every load.
  */
 export function retryUnresolved() {
-  const pending = items.filter((item) => !item.resolved && !item.resolving)
+  const pending = getItems().filter((item) => !item.resolved && !item.resolving)
   if (pending.length === 0) return
   pending.forEach((item) => {
     patch(item.key, { resolving: true })
