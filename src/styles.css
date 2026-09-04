@@ -1,0 +1,782 @@
+:root {
+  --bg: #0f0f0f;
+  --surface: #212121;
+  --surface-hover: #2f2f2f;
+  --chip: #272727;
+  --text: #f1f1f1;
+  --text-dim: #aaaaaa;
+  --border: #303030;
+  --yt: #ff0033;
+  --sp: #1ed760;
+  --header-h: 56px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Roboto", "Helvetica Neue", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; }
+
+/* ---------- header ---------- */
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: var(--header-h);
+  padding: 0 16px;
+  background: var(--bg);
+  padding-top: env(safe-area-inset-top);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  flex-shrink: 0;
+}
+
+.brand svg { display: block; }
+
+.search {
+  flex: 1;
+  /* Without this the input's intrinsic width keeps the field from shrinking,
+     which pushes the Add button off the edge on a phone. */
+  min-width: 0;
+  max-width: 520px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 14px;
+  background: #121212;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.search:focus-within { border-color: #3ea6ff; }
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+}
+
+.search input::placeholder { color: #717171; }
+
+.icon-button {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--chip);
+  color: var(--text);
+  transition: background 120ms ease;
+}
+
+.icon-button:hover { background: var(--surface-hover); }
+
+.add-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  height: 36px;
+  padding: 0 14px;
+  background: var(--chip);
+  border: none;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 120ms ease;
+}
+
+.add-button:hover { background: var(--surface-hover); }
+
+.layout-switcher {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 3px;
+  background: var(--chip);
+  border-radius: 999px;
+}
+
+.layout-option {
+  width: 32px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--text-dim);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.layout-option:hover { color: var(--text); background: var(--surface-hover); }
+
+.layout-option[aria-pressed="true"] { background: var(--text); color: #0f0f0f; }
+
+/* ---------- filter chips ---------- */
+
+.chips-row {
+  position: sticky;
+  top: calc(var(--header-h) + env(safe-area-inset-top));
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg);
+}
+
+.chips {
+  flex: 1;
+  /* Lets the chip strip scroll instead of squeezing the pinned sort button. */
+  min-width: 0;
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar { display: none; }
+
+.chip {
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 12px;
+  background: var(--chip);
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 120ms ease;
+}
+
+.chip:hover { background: var(--surface-hover); }
+
+.chip[aria-pressed="true"] { background: var(--text); color: #0f0f0f; }
+
+.chip .count { opacity: 0.6; margin-left: 6px; font-variant-numeric: tabular-nums; }
+
+.sort-button {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px;
+  background: var(--chip);
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 120ms ease;
+}
+
+.sort-button:hover { background: var(--surface-hover); }
+
+.sort-button svg { flex-shrink: 0; }
+
+/* ---------- grid ---------- */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 40px 16px;
+  padding: 12px 16px 64px;
+}
+
+.card {
+  /* A button is shrink-to-fit by default, which would let the title length
+     drive the tile width instead of the grid track. */
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: none;
+  background: none;
+  padding: 0;
+  text-align: left;
+  border-radius: 12px;
+}
+
+.card:focus-visible { outline: 2px solid #3ea6ff; outline-offset: 6px; }
+
+/* ---------- layout variants ---------- */
+
+/* Compact: same card, more of them per row. */
+.grid.layout-compact {
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 28px 12px;
+}
+
+.grid.layout-compact .title { font-size: 13px; }
+
+.grid.layout-compact .avatar { width: 28px; height: 28px; font-size: 13px; }
+
+.grid.layout-compact .subtitle { font-size: 11.5px; }
+
+/* List: one item per row, artwork beside the text. */
+.grid.layout-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 1000px;
+}
+
+.grid.layout-list .card {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 8px;
+  border-radius: 12px;
+  transition: background 120ms ease;
+}
+
+.grid.layout-list .card-shell:hover .card { background: var(--surface); }
+
+.grid.layout-list .thumb {
+  flex-shrink: 0;
+  width: clamp(160px, 26vw, 260px);
+}
+
+.grid.layout-list .meta { flex: 1; min-width: 0; padding-top: 4px; }
+
+.grid.layout-list .title {
+  font-size: 16px;
+  -webkit-line-clamp: 2;
+}
+
+/* Rows: the dense option. One line per item, small artwork, as many on screen
+   as will fit — for scanning a long library rather than browsing it. */
+.grid.layout-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-width: 1100px;
+  padding: 4px 16px 64px;
+}
+
+.grid.layout-rows .card {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  /* Room on the right for the delete control, which sits over the row. */
+  padding: 7px 66px 7px 8px;
+  border-radius: 8px;
+  transition: background 120ms ease;
+}
+
+.grid.layout-rows .card-shell + .card-shell { border-top: 1px solid var(--border); }
+
+.grid.layout-rows .card-shell:hover .card { background: var(--surface); }
+
+.grid.layout-rows .thumb {
+  flex-shrink: 0;
+  width: 64px;
+  border-radius: 4px;
+}
+
+/* At this size the hover overlay and kind badge are unreadable noise. */
+.grid.layout-rows .thumb .play,
+.grid.layout-rows .thumb .badge { display: none; }
+
+.grid.layout-rows .meta {
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+}
+
+/* The avatar becomes a platform colour dot — no room for an initial. */
+.grid.layout-rows .avatar {
+  width: 8px;
+  height: 8px;
+  font-size: 0;
+}
+
+.grid.layout-rows .meta-text {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.grid.layout-rows .title {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grid.layout-rows .subtitle {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Dates align on the right edge, so the column can be scanned down. */
+.grid.layout-rows .subtitle.added {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 12px;
+}
+
+.grid.layout-rows .added-label { display: none; }
+
+.grid.layout-rows .card-tools {
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  gap: 2px;
+}
+
+.grid.layout-rows .tool {
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.grid.layout-rows .tool:hover { background: var(--surface-hover); color: var(--text); }
+
+.grid.layout-rows .watch-toggle.is-watched { background: transparent; color: var(--sp); }
+
+/* No room for the corner badge at this size; the dimmed art and the green
+   toggle already carry the state. */
+.grid.layout-rows .thumb .watched-badge { display: none; }
+
+/* In a row the controls belong beside the item, not over the artwork. */
+.grid.layout-list .card-tools {
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+}
+
+.grid.layout-list .tool { background: var(--chip); color: var(--text); }
+
+.grid.layout-list .tool:hover { background: var(--surface-hover); }
+
+.grid.layout-list .watch-toggle.is-watched { background: var(--sp); color: #0f0f0f; }
+
+.thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+/* Spotify artwork is square; a blurred copy fills the 16:9 tile so the grid
+   keeps one rhythm instead of letterboxing music next to video. */
+.thumb .backdrop {
+  position: absolute;
+  inset: -20%;
+  width: 140%;
+  height: 140%;
+  object-fit: cover;
+  filter: blur(28px) saturate(1.5) brightness(0.55);
+}
+
+.thumb .art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.thumb.square .art { object-fit: contain; padding: 6px; }
+
+.thumb .badge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.8);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.thumb .badge .dot { width: 8px; height: 8px; border-radius: 50%; }
+
+.card:hover .thumb .play {
+  opacity: 1;
+}
+
+.thumb .play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.meta { display: flex; gap: 12px; align-items: flex-start; }
+
+.avatar {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 15px;
+  color: #fff;
+}
+
+.meta-text { min-width: 0; flex: 1; }
+
+.title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.subtitle.added { color: #8a8a8a; }
+
+.subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-tools {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.tool {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  transition: background 120ms ease;
+}
+
+.tool:hover { background: rgba(0, 0, 0, 0.92); }
+
+.card-shell:hover .card-tools,
+.card-tools:focus-within { opacity: 1; }
+
+.watch-toggle.is-watched { background: var(--sp); color: #0f0f0f; }
+
+.watch-toggle.is-watched:hover { background: #3ff07a; }
+
+.card-shell { position: relative; }
+
+/* Coarse pointers get no hover, so the controls stay visible there. */
+@media (pointer: coarse) {
+  .card-tools { opacity: 1; }
+}
+
+/* ---------- watched state ---------- */
+
+/* Scoped to .thumb so it outranks `.thumb .badge`, which pins the kind badge
+   to the bottom-right; without that the two stack on top of each other. */
+.thumb .watched-badge {
+  right: auto;
+  bottom: auto;
+  top: 8px;
+  left: 8px;
+  gap: 4px;
+  background: rgba(30, 215, 96, 0.92);
+  color: #0f0f0f;
+}
+
+/* Watched items recede rather than disappear: still findable, clearly done. */
+.card-shell.watched .thumb .art,
+.card-shell.watched .thumb .backdrop { filter: grayscale(0.8) brightness(0.5); }
+
+.card-shell.watched .title { color: var(--text-dim); }
+
+.card-shell.watched .avatar { opacity: 0.55; }
+
+/* ---------- skeleton ---------- */
+
+.skeleton {
+  background: linear-gradient(90deg, #212121 25%, #2c2c2c 37%, #212121 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease infinite;
+}
+
+@keyframes shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+}
+
+/* ---------- empty state ---------- */
+
+.empty {
+  max-width: 620px;
+  margin: 48px auto;
+  padding: 0 24px 64px;
+  text-align: left;
+}
+
+.empty h2 { font-size: 22px; margin: 0 0 8px; }
+
+.empty p { color: var(--text-dim); line-height: 1.6; margin: 0 0 24px; }
+
+.steps { display: grid; gap: 16px; margin: 0; padding: 0; list-style: none; }
+
+.step {
+  display: flex;
+  gap: 14px;
+  padding: 16px;
+  background: var(--surface);
+  border-radius: 12px;
+}
+
+.step .num {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--chip);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.step h3 { margin: 2px 0 6px; font-size: 15px; }
+
+.step p { margin: 0; font-size: 13.5px; }
+
+/* ---------- dialog ---------- */
+
+dialog.sheet {
+  width: min(520px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+dialog.sheet::backdrop { background: rgba(0, 0, 0, 0.6); }
+
+.sheet form,
+.sheet .sheet-body { padding: 24px; display: grid; gap: 16px; }
+
+.sheet .hint { font-size: 12.5px; color: #8a8a8a; }
+
+.sheet .success { color: #7ee2a8; font-size: 13px; }
+
+.data-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+.data-actions .btn { flex: 1; min-width: 150px; }
+
+.sheet h2 { margin: 0; font-size: 18px; }
+
+.sheet p { margin: 0; font-size: 13.5px; color: var(--text-dim); line-height: 1.5; }
+
+.sheet input[type="url"],
+.sheet input[type="text"] {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  background: #121212;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.sheet input:focus { border-color: #3ea6ff; }
+
+.sheet .error { color: #ff8080; font-size: 13px; }
+
+.sheet .actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.btn {
+  height: 38px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 999px;
+  background: var(--chip);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.btn:hover { background: var(--surface-hover); }
+
+.btn.primary { background: #3ea6ff; color: #0f0f0f; font-weight: 600; }
+
+.btn.primary:hover { background: #63b8ff; }
+
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---------- toast ---------- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 18px;
+  border-radius: 10px;
+  background: #f1f1f1;
+  color: #0f0f0f;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  animation: rise 180ms ease;
+}
+
+.toast.error { background: #ff8080; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+}
+
+@media (max-width: 600px) {
+  .grid { grid-template-columns: 1fr; gap: 24px 0; padding: 8px 0 64px; }
+
+  .grid.layout-compact {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 18px 8px;
+    padding: 8px 8px 64px;
+  }
+
+  .grid.layout-compact .thumb { border-radius: 8px; }
+
+  .grid.layout-compact .meta { padding: 0; }
+
+  .grid.layout-list { padding: 8px 8px 64px; gap: 4px; }
+
+  .grid.layout-list .thumb { width: 42vw; border-radius: 8px; }
+
+  .grid.layout-list .title { font-size: 14px; }
+
+  .grid.layout-list .meta { padding: 0; }
+
+  .grid.layout-list .avatar { display: none; }
+
+  .grid.layout-rows { padding: 4px 8px 64px; }
+
+  .grid.layout-rows .thumb { width: 52px; }
+
+  /* Title and date only — the channel line is the first thing to give up. */
+  .grid.layout-rows .subtitle:not(.added) { display: none; }
+
+  .grid.layout-rows .card { padding-right: 60px; }
+
+  /* Kept on phones — layout choice matters most on a small screen — but
+     tightened so the header still fits alongside search and Add. */
+  .layout-switcher { gap: 0; padding: 2px; }
+
+  .layout-option { width: 26px; height: 26px; }
+
+  .layout-option svg { width: 15px; height: 15px; }
+  .thumb { border-radius: 0; }
+  .card-tools { right: 12px; }
+  .meta { padding: 0 12px; }
+  .add-button span { display: none; }
+  .icon-button {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--chip);
+  color: var(--text);
+  transition: background 120ms ease;
+}
+
+.icon-button:hover { background: var(--surface-hover); }
+
+.add-button { padding: 0 10px; }
+  .header { gap: 8px; padding: 0 8px; }
+
+  .icon-button { width: 32px; height: 32px; }
+  /* The wordmark is the first thing to go; the logo still identifies the app. */
+  .brand { font-size: 0; gap: 0; }
+  .chips-row { padding: 10px; gap: 8px; }
+
+  .chips { gap: 8px; }
+
+  /* The icon alone carries the meaning once space is tight; the button keeps
+     its accessible name either way. */
+  .sort-button span { display: none; }
+
+  .sort-button { padding: 0 9px; }
+}

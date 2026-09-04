@@ -1,0 +1,296 @@
+// Run with: node scripts/test-links.ts  (node strips the types natively)
+import assert from 'node:assert/strict'
+import { parseLink, dedupeKey } from '../src/lib/links.ts'
+import { relativeTime } from '../src/lib/time.ts'
+import { sortItems } from '../src/lib/sort.ts'
+import { buildExport, exportFilename, parseImport } from '../src/lib/transfer.ts'
+import { DEFAULT_FILTER, FILTERS, findFilter, isFilterId } from '../src/lib/filters.ts'
+
+let passed = 0
+const check = (name: string, fn: () => void) => {
+  try {
+    fn()
+    passed++
+  } catch (error) {
+    console.error(`FAIL  ${name}\n      ${(error as Error).message}`)
+    process.exitCode = 1
+  }
+}
+
+const expect = (input: string, platform: string, kind: string, id: string) =>
+  check(input, () => {
+    const link = parseLink(input)
+    assert.ok(link, 'expected a parse result')
+    assert.equal(link.platform, platform)
+    assert.equal(link.kind, kind)
+    assert.equal(link.id, id)
+  })
+
+const reject = (input: string) =>
+  check(`reject ${input}`, () => assert.equal(parseLink(input), null))
+
+// --- YouTube ---
+expect('https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'youtube', 'video', 'dQw4w9WgXcQ')
+expect('https://youtu.be/dQw4w9WgXcQ', 'youtube', 'video', 'dQw4w9WgXcQ')
+expect('https://youtu.be/dQw4w9WgXcQ?t=42', 'youtube', 'video', 'dQw4w9WgXcQ')
+expect('https://m.youtube.com/watch?v=dQw4w9WgXcQ&feature=share', 'youtube', 'video', 'dQw4w9WgXcQ')
+expect('https://music.youtube.com/watch?v=dQw4w9WgXcQ', 'youtube', 'video', 'dQw4w9WgXcQ')
+expect('https://www.youtube.com/shorts/abcdefghijk', 'youtube', 'short', 'abcdefghijk')
+expect('https://www.youtube.com/embed/dQw4w9WgXcQ', 'youtube', 'video', 'dQw4w9WgXcQ')
+expect('https://www.youtube.com/live/dQw4w9WgXcQ', 'youtube', 'video', 'dQw4w9WgXcQ')
+expect(
+  'https://www.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI',
+  'youtube', 'playlist', 'PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI'
+)
+
+// A /watch URL carrying a list should stay the video, not become the playlist.
+check('watch + list prefers the video', () => {
+  const link = parseLink('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLFgquLnL59alCl')
+  assert.equal(link?.kind, 'video')
+  assert.equal(link?.id, 'dQw4w9WgXcQ')
+})
+
+// --- Spotify ---
+expect('https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT', 'spotify', 'track', '4cOdK2wGLETKBW3PvgPWqT')
+expect('https://open.spotify.com/intl-de/track/4cOdK2wGLETKBW3PvgPWqT', 'spotify', 'track', '4cOdK2wGLETKBW3PvgPWqT')
+expect('spotify:album:4cOdK2wGLETKBW3PvgPWqT', 'spotify', 'album', '4cOdK2wGLETKBW3PvgPWqT')
+expect('https://open.spotify.com/episode/4cOdK2wGLETKBW3PvgPWqT', 'spotify', 'episode', '4cOdK2wGLETKBW3PvgPWqT')
+expect('https://open.spotify.com/artist/4cOdK2wGLETKBW3PvgPWqT', 'spotify', 'artist', '4cOdK2wGLETKBW3PvgPWqT')
+
+// --- Shared text, as share sheets actually send it ---
+expect(
+  'Check this out https://youtu.be/dQw4w9WgXcQ?si=xyz via @YouTube',
+  'youtube', 'video', 'dQw4w9WgXcQ'
+)
+expect(
+  'Never Gonna Give You Up\nhttps://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT?si=abc123',
+  'spotify', 'track', '4cOdK2wGLETKBW3PvgPWqT'
+)
+check('trailing punctuation is trimmed', () => {
+  const link = parseLink('watch this: https://youtu.be/dQw4w9WgXcQ.')
+  assert.equal(link?.id, 'dQw4w9WgXcQ')
+})
+
+// --- Canonical output ---
+check('canonical urls and app uris', () => {
+  assert.equal(
+    parseLink('https://youtu.be/dQw4w9WgXcQ')?.url,
+    'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+  )
+  assert.equal(
+    parseLink('spotify:track:4cOdK2wGLETKBW3PvgPWqT')?.url,
+    'https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT'
+  )
+  assert.equal(
+    parseLink('https://open.spotify.com/intl-de/track/4cOdK2wGLETKBW3PvgPWqT')?.appUri,
+    'spotify:track:4cOdK2wGLETKBW3PvgPWqT'
+  )
+})
+
+// Different surface forms of the same content must collapse to one entry.
+check('dedupe key is form-independent', () => {
+  const a = parseLink('https://youtu.be/dQw4w9WgXcQ')!
+  const b = parseLink('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=X')!
+  assert.equal(dedupeKey(a), dedupeKey(b))
+
+  const c = parseLink('spotify:track:4cOdK2wGLETKBW3PvgPWqT')!
+  const d = parseLink('https://open.spotify.com/intl-fr/track/4cOdK2wGLETKBW3PvgPWqT?si=1')!
+  assert.equal(dedupeKey(c), dedupeKey(d))
+})
+
+// --- Non-links ---
+reject('https://example.com/watch?v=dQw4w9WgXcQ')
+reject('https://vimeo.com/12345')
+reject('just some text')
+reject('')
+reject('https://open.spotify.com/track/tooshort')
+reject('https://www.youtube.com/watch?v=short')
+reject('https://www.youtube.com/@RickAstleyYT')
+
+// --- relative time ---
+const NOW = Date.UTC(2026, 0, 15, 12, 0, 0)
+const ago = (ms: number) => relativeTime(NOW - ms, NOW)
+const SECOND = 1000
+const MINUTE = 60 * SECOND
+const HOUR = 60 * MINUTE
+const DAY = 24 * HOUR
+
+check('relative time buckets', () => {
+  assert.equal(ago(5 * SECOND), 'just now')
+  assert.equal(ago(MINUTE), '1 minute ago')
+  assert.equal(ago(5 * MINUTE), '5 minutes ago')
+  assert.equal(ago(HOUR), '1 hour ago')
+  assert.equal(ago(7 * HOUR), '7 hours ago')
+  assert.equal(ago(DAY), '1 day ago')
+  assert.equal(ago(3 * DAY), '3 days ago')
+  assert.equal(ago(8 * DAY), '1 week ago')
+  assert.equal(ago(21 * DAY), '3 weeks ago')
+  assert.equal(ago(45 * DAY), '1 month ago')
+  assert.equal(ago(200 * DAY), '6 months ago')
+  assert.equal(ago(400 * DAY), '1 year ago')
+  assert.equal(ago(800 * DAY), '2 years ago')
+})
+
+// A timestamp from the future (clock skew, edited storage) must not read as negative.
+check('future timestamps degrade to "just now"', () => {
+  assert.equal(relativeTime(NOW + 10 * DAY, NOW), 'just now')
+})
+
+// --- sorting ---
+const row = (key: string, addedAt: number) => ({ key, addedAt })
+const sample = [row('b', 200), row('a', 100), row('c', 300)]
+const keys = (order: 'newest' | 'oldest') => sortItems(sample, order).map((r) => r.key)
+
+check('newest first', () => assert.deepEqual(keys('newest'), ['c', 'b', 'a']))
+check('oldest first', () => assert.deepEqual(keys('oldest'), ['a', 'b', 'c']))
+
+check('sorting does not mutate the input', () => {
+  const before = sample.map((r) => r.key)
+  sortItems(sample, 'oldest')
+  assert.deepEqual(sample.map((r) => r.key), before)
+})
+
+// Two links saved in the same millisecond must not shuffle between renders.
+check('ties are broken stably by key', () => {
+  const tied = [row('z', 500), row('a', 500), row('m', 500)]
+  assert.deepEqual(sortItems(tied, 'newest').map((r) => r.key), ['a', 'm', 'z'])
+  assert.deepEqual(sortItems(tied, 'oldest').map((r) => r.key), ['a', 'm', 'z'])
+})
+
+// --- export / import ---
+const libraryItem = {
+  ...parseLink('https://youtu.be/dQw4w9WgXcQ')!,
+  key: 'youtube:video:dQw4w9WgXcQ',
+  title: 'Never Gonna Give You Up',
+  subtitle: 'Rick Astley',
+  thumbnail: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+  addedAt: 1_700_000_000_000,
+  watchedAt: null,
+  resolved: true,
+}
+
+const roundTrip = (items: unknown[]) =>
+  parseImport(JSON.stringify({ ...buildExport(items as never), items }))
+
+check('export/import round-trips an item intact', () => {
+  const { items, skipped } = roundTrip([libraryItem])
+  assert.equal(skipped, 0)
+  assert.equal(items.length, 1)
+  assert.equal(items[0].title, 'Never Gonna Give You Up')
+  assert.equal(items[0].subtitle, 'Rick Astley')
+  assert.equal(items[0].addedAt, 1_700_000_000_000)
+  assert.equal(items[0].key, 'youtube:video:dQw4w9WgXcQ')
+  assert.equal(items[0].resolved, true)
+  assert.equal(items[0].watchedAt, null)
+})
+
+check('watched state survives a round trip', () => {
+  const { items } = roundTrip([{ ...libraryItem, watchedAt: 1_710_000_000_000 }])
+  assert.equal(items[0].watchedAt, 1_710_000_000_000)
+})
+
+check('unusable watched values mean "still queued"', () => {
+  for (const watchedAt of [NaN, -1, 0, 'yes', {}, undefined]) {
+    const { items } = roundTrip([{ ...libraryItem, watchedAt }])
+    assert.equal(items[0].watchedAt, null, `should reject ${String(watchedAt)}`)
+  }
+})
+
+check('export filename carries the date', () => {
+  assert.equal(exportFilename(new Date('2026-09-04T10:00:00Z')), 'youplay-library-2026-09-04.json')
+})
+
+check('export envelope is self-describing', () => {
+  const file = buildExport([libraryItem] as never, new Date('2026-09-04T10:00:00Z'))
+  assert.equal(file.app, 'youplay')
+  assert.equal(file.version, 1)
+  assert.equal(file.exportedAt, '2026-09-04T10:00:00.000Z')
+})
+
+check('rejects files that are not exports', () => {
+  assert.throws(() => parseImport('not json'), /valid JSON/)
+  assert.throws(() => parseImport('{"nope":1}'), /YouPlay export/)
+  assert.throws(() => parseImport('[]'), /YouPlay export/)
+})
+
+check('unreadable entries are counted, not fatal', () => {
+  const { items, skipped } = roundTrip([
+    libraryItem,
+    { url: 'https://vimeo.com/1' },
+    { url: 42 },
+    {},
+  ])
+  assert.equal(items.length, 1)
+  assert.equal(skipped, 3)
+})
+
+check('duplicates inside one file collapse', () => {
+  const { items, skipped } = roundTrip([
+    libraryItem,
+    { ...libraryItem, url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' },
+  ])
+  assert.equal(items.length, 1)
+  assert.equal(skipped, 1)
+})
+
+// The file is user-editable, so identity fields are re-derived rather than trusted.
+check('spoofed identity fields are re-derived from the url', () => {
+  const { items } = roundTrip([
+    { ...libraryItem, platform: 'spotify', kind: 'album', id: 'evil', key: 'spotify:album:evil' },
+  ])
+  assert.equal(items[0].platform, 'youtube')
+  assert.equal(items[0].kind, 'video')
+  assert.equal(items[0].id, 'dQw4w9WgXcQ')
+  assert.equal(items[0].key, 'youtube:video:dQw4w9WgXcQ')
+})
+
+check('hostile thumbnails are dropped', () => {
+  for (const thumbnail of ['javascript:alert(1)', 'data:text/html,<script>', 'not a url', 12]) {
+    const { items } = roundTrip([{ ...libraryItem, thumbnail }])
+    assert.equal(items[0].thumbnail, null, `should reject ${String(thumbnail)}`)
+    assert.equal(items[0].resolved, false, 'no artwork means it gets re-fetched')
+  }
+  const { items } = roundTrip([{ ...libraryItem, thumbnail: 'https://example.com/a.jpg' }])
+  assert.equal(items[0].thumbnail, 'https://example.com/a.jpg')
+})
+
+check('bad timestamps fall back to now', () => {
+  for (const addedAt of [NaN, -1, 'yesterday', null]) {
+    const { items } = roundTrip([{ ...libraryItem, addedAt }])
+    assert.ok(items[0].addedAt > 0 && Number.isFinite(items[0].addedAt))
+  }
+})
+
+// --- filters ---
+const asItem = (over: Record<string, unknown>) => ({ ...libraryItem, ...over }) as never
+const matches = (id: string, item: unknown) => findFilter(id as never).match(item as never)
+
+check('watched filters split on watchedAt', () => {
+  assert.equal(matches('unwatched', asItem({ watchedAt: null })), true)
+  assert.equal(matches('unwatched', asItem({ watchedAt: 1 })), false)
+  assert.equal(matches('watched', asItem({ watchedAt: 1 })), true)
+  assert.equal(matches('watched', asItem({ watchedAt: null })), false)
+  assert.equal(matches('all', asItem({ watchedAt: null })), true)
+})
+
+check('content filters match their kinds', () => {
+  assert.equal(matches('music', asItem({ kind: 'album' })), true)
+  assert.equal(matches('music', asItem({ kind: 'video' })), false)
+  assert.equal(matches('podcasts', asItem({ kind: 'episode' })), true)
+  assert.equal(matches('playlists', asItem({ kind: 'playlist' })), true)
+  assert.equal(matches('spotify', asItem({ platform: 'spotify' })), true)
+})
+
+check('only known filter ids are accepted from storage', () => {
+  assert.equal(isFilterId('unwatched'), true)
+  assert.equal(isFilterId('nonsense'), false)
+  assert.equal(isFilterId(null), false)
+  assert.ok(FILTERS.some((f) => f.id === DEFAULT_FILTER))
+})
+
+// An unknown id must not blow up the render; it falls back to the first filter.
+check('findFilter falls back for unknown ids', () => {
+  assert.equal(findFilter('nope' as never).id, 'all')
+})
+
+console.log(`${passed} checks passed`)
