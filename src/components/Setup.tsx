@@ -4,7 +4,12 @@
  * intake is driven by a one-step Shortcut that opens /?url=…
  */
 export function Setup() {
-  const origin = typeof window === 'undefined' ? '' : window.location.origin
+  // The app's own base, not just the origin — it is served from a subpath on
+  // GitHub Pages, and a Shortcut pointed at the bare origin would 404.
+  const appUrl =
+    typeof window === 'undefined'
+      ? ''
+      : new URL(import.meta.env.BASE_URL, window.location.origin).href
 
   return (
     <ol className="steps">
@@ -36,7 +41,7 @@ export function Setup() {
           <p>
             iOS has no share-target support, so make a Shortcut with{' '}
             <strong>Receive URLs from Share Sheet</strong> → <strong>Open URL</strong> set to{' '}
-            <code>{origin}/?link=</code> joined with the shared URL. Name it “Save to YouPlay” and it
+            <code>{appUrl}?link=</code> joined with the shared URL. Name it “Save to YouPlay” and it
             appears in every share sheet.
           </p>
         </div>

@@ -1,5 +1,7 @@
 # YouPlay
 
+**Live: https://shaharkalderon.github.io/youplay/**
+
 Your YouTube and Spotify links in one YouTube-style library. Tap anything and it
 opens in the app it came from.
 
@@ -14,6 +16,23 @@ opens in the app it came from.
 - **No backend, no API keys, no OAuth.** Titles and artwork come from YouTube's
   and Spotify's public oEmbed endpoints, which allow browser CORS. Your library
   lives in `localStorage` on your device.
+
+## Deployment
+
+Pushing to `main` runs [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml),
+which installs, runs the tests, builds, and publishes `dist/` to GitHub Pages.
+A failing test blocks the deploy.
+
+Because Pages serves the app from `/youplay/` rather than a domain root, the
+subpath is threaded through carefully:
+
+- `vite.config.ts` sets `base` (override with `BASE_PATH=/ npm run build`).
+- `index.html` uses Vite's `%BASE_URL%` placeholder for the manifest and icons.
+- The manifest uses **relative** URLs (`./`), which the spec resolves against the
+  manifest's own location — so `scope`, `start_url` and the share-target action
+  all land on `/youplay/` with no build-time substitution.
+- The service worker derives its own base from `self.location`, so it needs no
+  substitution either and works at `/` and `/youplay/` alike.
 
 ## Running it
 
@@ -31,9 +50,8 @@ npm install && npm run dev
 
 ## Getting links in
 
-Sharing needs the app **installed**, and installing needs **HTTPS** (or
-`localhost`). Deploy `dist/` to any static host — Netlify, Vercel, GitHub Pages,
-Cloudflare Pages — then:
+Sharing needs the app **installed**, and installing needs **HTTPS**. The live
+site above is already installable; open it on your phone and:
 
 **Android / Chrome.** Install it (menu → *Install app*). "YouPlay" then appears
 in the YouTube and Spotify share sheets. This is the real
@@ -44,7 +62,8 @@ declared in `public/manifest.webmanifest`.
 this. Use a Shortcut instead:
 
 1. Shortcuts → new shortcut → enable **Show in Share Sheet**, accepting *URLs*.
-2. Add **Open URL**, set to **Text**: `https://your-host/?link=` followed by the
+2. Add **Open URL**, set to **Text**:
+   `https://shaharkalderon.github.io/youplay/?link=` followed by the
    **Shortcut Input** variable.
 3. Name it "Save to YouPlay". It now appears in every share sheet.
 
@@ -164,11 +183,9 @@ the rest is filled in from oEmbed on import.
 - **Private, deleted or region-locked links** fall back to a placeholder card
   with the ID. Unresolved items are retried on every load — sharing into the app
   often kills the lookup mid-flight when you swipe away.
-- **Service worker registration is unverified.** It is correct and served with
-  the right MIME type, but the sandboxed browser used during development blocks
-  registration outright. Confirm in Chrome DevTools → *Application* → *Service
-  Workers* after your first real deploy, since installability is what makes the
-  share target work.
+- The service worker registers and activates on the live site, scoped to
+  `/youplay/`. It does **not** register over plain `http://localhost` in some
+  embedded browsers — that is an environment limit, not a code problem.
 - The library is per-device. There is no sync — export/import is the manual
   substitute.
 
