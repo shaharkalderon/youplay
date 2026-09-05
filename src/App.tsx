@@ -3,6 +3,7 @@ import { AddDialog } from './components/AddDialog'
 import { Card } from './components/Card'
 import { DataDialog } from './components/DataDialog'
 import { EmptyState } from './components/EmptyState'
+import { Profile } from './components/Profile'
 import { DataIcon, LogoIcon, PlusIcon, SearchIcon } from './components/Icons'
 import { LayoutSwitcher } from './components/LayoutSwitcher'
 import { SortControl } from './components/SortControl'
@@ -32,6 +33,7 @@ export default function App() {
   const filterId = useFilterId()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dataOpen, setDataOpen] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
   const [toast, setToast] = useState<Toast>(null)
   const consumedShare = useRef(false)
 
@@ -149,11 +151,18 @@ export default function App() {
   return (
     <>
       <header className="header">
-        <div className="brand">
+        <button
+          className="brand"
+          onClick={() => setShowProfile((open) => !open)}
+          aria-expanded={showProfile}
+          aria-label={showProfile ? 'Back to your library' : 'Open your profile'}
+          title={showProfile ? 'Back to your library' : 'Your profile'}
+        >
           <LogoIcon />
           YouPlay
-        </div>
+        </button>
 
+        {!showProfile && (
         <div className="search">
           <SearchIcon />
           <input
@@ -164,8 +173,9 @@ export default function App() {
             aria-label="Search your library"
           />
         </div>
+        )}
 
-        <LayoutSwitcher value={layout} />
+        {!showProfile && <LayoutSwitcher value={layout} />}
 
         <button
           className="icon-button"
@@ -183,7 +193,7 @@ export default function App() {
         </button>
       </header>
 
-      {items.length > 0 && (
+      {items.length > 0 && !showProfile && (
         <div className="chips-row">
           <nav className="chips" aria-label="Filter library">
             {FILTERS.map((filter) => {
@@ -210,7 +220,13 @@ export default function App() {
       )}
 
       <main>
-        {visible.length === 0 ? (
+        {showProfile ? (
+          <Profile
+            items={items}
+            account={account}
+            onOpenData={() => setDataOpen(true)}
+          />
+        ) : visible.length === 0 ? (
           <EmptyState
             filtered={items.length > 0}
             queueCleared={
@@ -234,12 +250,7 @@ export default function App() {
 
       <AddDialog open={dialogOpen} onClose={() => setDialogOpen(false)} onAdd={handleAdd} />
 
-      <DataDialog
-        open={dataOpen}
-        onClose={() => setDataOpen(false)}
-        items={items}
-        account={account}
-      />
+      <DataDialog open={dataOpen} onClose={() => setDataOpen(false)} items={items} />
 
       {toast && (
         <div className={`toast ${toast.tone === 'error' ? 'error' : ''}`} role="status">

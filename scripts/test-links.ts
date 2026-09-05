@@ -6,6 +6,7 @@ import { sortItems } from '../src/lib/sort.ts'
 import { buildExport, exportFilename, parseImport } from '../src/lib/transfer.ts'
 import { DEFAULT_FILTER, FILTERS, findFilter, isFilterId } from '../src/lib/filters.ts'
 import { mergeItems, pruneTombstones, liveItems, TOMBSTONE_TTL_MS } from '../src/lib/sync.ts'
+import { libraryStats } from '../src/lib/stats.ts'
 
 let passed = 0
 const check = (name: string, fn: () => void) => {
@@ -385,6 +386,54 @@ check('old tombstones are pruned, live items never are', () => {
     now
   )
   assert.deepEqual(new Set(kept.map((i) => i.key)), new Set(['live', 'fresh']))
+})
+
+// --- profile stats ---
+const statItem = (over: Record<string, unknown>) => ({ ...libraryItem, ...over }) as never
+
+check('stats on an empty library are zeroes, not NaN', () => {
+  const s = libraryStats([])
+  assert.equal(s.total, 0)
+  assert.equal(s.watchedPercent, 0)
+  assert.equal(s.firstAddedAt, null)
+  assert.equal(s.lastWatchedAt, null)
+  assert.deepEqual(s.byKind, [])
+})
+
+check('stats count platforms, kinds and watched state', () => {
+  const s = libraryStats([
+    statItem({ key: 'a', platform: 'youtube', kind: 'video', watchedAt: 5, addedAt: 100 }),
+    statItem({ key: 'b', platform: 'youtube', kind: 'video', watchedAt: null, addedAt: 200 }),
+    statItem({ key: 'c', platform: 'spotify', kind: 'album', watchedAt: null, addedAt: 50 }),
+    statItem({ key: 'd', platform: 'spotify', kind: 'track', watchedAt: 9, addedAt: 300 }),
+  ])
+  assert.equal(s.total, 4)
+  assert.equal(s.youtube, 2)
+  assert.equal(s.spotify, 2)
+  assert.equal(s.watched, 2)
+  assert.equal(s.unwatched, 2)
+  assert.equal(s.watchedPercent, 50)
+  assert.equal(s.firstAddedAt, 50)
+  assert.equal(s.lastAddedAt, 300)
+  assert.equal(s.lastWatchedAt, 9)
+  assert.deepEqual(s.byKind[0], { kind: 'video', label: 'Video', count: 2 })
+})
+
+check('equal kind counts order alphabetically, not arbitrarily', () => {
+  const s = libraryStats([
+    statItem({ key: 'a', kind: 'track' }),
+    statItem({ key: 'b', kind: 'album' }),
+  ])
+  assert.deepEqual(s.byKind.map((k) => k.label), ['Album', 'Track'])
+})
+
+check('watched percent rounds', () => {
+  const s = libraryStats([
+    statItem({ key: 'a', watchedAt: 1 }),
+    statItem({ key: 'b', watchedAt: null }),
+    statItem({ key: 'c', watchedAt: null }),
+  ])
+  assert.equal(s.watchedPercent, 33)
 })
 
 console.log(`${passed} checks passed`)

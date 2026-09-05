@@ -13,6 +13,7 @@ opens in the app it came from.
 - **Sort by date added**, newest or oldest first, also remembered.
 - **Export / import** your library as JSON, so it survives a cleared cache.
 - **Watched state**, turning the pile into a queue you can actually work through.
+- **Profile page** behind the logo: account, sync, library stats and setup help.
 - **No backend, no API keys, no OAuth.** Titles and artwork come from YouTube's
   and Spotify's public oEmbed endpoints, which allow browser CORS. Your library
   lives in `localStorage` on your device.
@@ -45,7 +46,7 @@ npm install && npm run dev
 | `npm run dev` | Dev server on :5173 |
 | `npm run build` | Typecheck + production build to `dist/` |
 | `npm run preview` | Serve the built output |
-| `npm test` | Parser, time, sort, transfer, watched, filter and merge checks (58 cases) |
+| `npm test` | Parser, time, sort, transfer, watched, filter, merge and stats checks (62 cases) |
 | `npm run icons` | Regenerate PWA icons |
 
 ## Getting links in
@@ -146,6 +147,18 @@ exactly when it was needed. Delegating to the platforms' own https handoff is
 both simpler and better tested, and its worst case is a working web player
 rather than nothing.
 
+## Profile
+
+Clicking the **YouPlay logo** opens your profile and clicking it again goes
+back. It gathers everything that is about *you* rather than about browsing:
+who you are signed in as, sync status and controls, what the library contains
+(totals, queue progress, a YouTube/Spotify split, a breakdown by kind, and when
+you first and last saved something), export/import, and the share-sheet setup
+instructions — which were previously only visible while the library was empty.
+
+The library controls — search, filters, sort and layout — hide while the
+profile is open, since none of them apply to it.
+
 ## Sync across devices
 
 Optional, and off until you configure it. Without credentials the app is
@@ -244,6 +257,7 @@ src/lib/preferences.ts  localStorage-backed layout and sort stores
 src/lib/time.ts       relative + absolute timestamps
 src/lib/transfer.ts   export envelope + defensive import parsing
 src/lib/sync.ts       merge, tombstones, pruning (pure, tested)
+src/lib/stats.ts      profile figures (pure, tested)
 src/lib/remote.ts     pull / merge / push against Supabase
 src/lib/session.ts    sign-in state and sync scheduling
 src/lib/supabase.ts   lazily loaded client, config detection

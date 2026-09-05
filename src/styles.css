@@ -45,11 +45,22 @@ button { font: inherit; color: inherit; cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 6px 10px 6px 6px;
+  margin-left: -6px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: inherit;
   font-size: 20px;
   font-weight: 700;
   letter-spacing: -0.5px;
   flex-shrink: 0;
+  transition: background 120ms ease;
 }
+
+.brand:hover { background: var(--chip); }
+
+.brand[aria-expanded="true"] { background: var(--chip); }
 
 .brand svg { display: block; }
 
@@ -803,8 +814,6 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, 0.6); }
   .header { gap: 8px; padding: 0 8px; }
 
   .icon-button { width: 32px; height: 32px; }
-  /* The wordmark is the first thing to go; the logo still identifies the app. */
-  .brand { font-size: 0; gap: 0; }
   .chips-row { padding: 10px; gap: 8px; }
 
   .chips { gap: 8px; }
@@ -814,4 +823,140 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, 0.6); }
   .sort-button span { display: none; }
 
   .sort-button { padding: 0 9px; }
+}
+
+/* ---------- profile ---------- */
+
+.profile {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 16px 80px;
+  display: grid;
+  gap: 32px;
+}
+
+.profile-head { display: flex; align-items: center; gap: 16px; }
+
+.profile-avatar {
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  font-weight: 700;
+  color: #0f0f0f;
+  background: linear-gradient(135deg, var(--yt), var(--sp));
+}
+
+.profile-head h1 {
+  margin: 0;
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+.profile-head p { margin: 4px 0 0; font-size: 13.5px; color: var(--text-dim); }
+
+.profile-section { display: grid; gap: 14px; }
+
+.profile-section > h2 {
+  margin: 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.stat {
+  display: grid;
+  gap: 2px;
+  padding: 14px;
+  background: var(--surface);
+  border-radius: 12px;
+}
+
+.stat-value { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.stat-label { font-size: 12.5px; color: var(--text-dim); }
+
+.split-bar {
+  display: flex;
+  gap: 3px;
+  height: 10px;
+  overflow: hidden;
+}
+
+.split-bar span { border-radius: 999px; }
+
+.split-yt { background: var(--yt); }
+
+.split-sp { background: var(--sp); }
+
+.split-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.split-legend .dot { width: 9px; height: 9px; border-radius: 50%; }
+
+.split-legend .dot:nth-of-type(2) { margin-left: 10px; }
+
+.kind-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
+
+.kind-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--surface);
+  font-size: 14px;
+}
+
+.kind-list li:first-child { border-radius: 10px 10px 0 0; }
+
+.kind-list li:last-child { border-radius: 0 0 10px 10px; }
+
+.kind-list li:only-child { border-radius: 10px; }
+
+.kind-count { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+.fact-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.fact-list div {
+  padding: 12px 14px;
+  background: var(--surface);
+  border-radius: 10px;
+}
+
+.fact-list dt { font-size: 12px; color: var(--text-dim); }
+
+.fact-list dd { margin: 4px 0 0; font-size: 14px; }
+
+.profile .sync-panel h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+}
+
+.profile .steps { gap: 10px; }
+
+@media (max-width: 600px) {
+  .profile { padding: 16px 12px 80px; gap: 26px; }
+  .brand { font-size: 0; padding: 6px; }
 }
