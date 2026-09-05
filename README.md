@@ -46,7 +46,7 @@ npm install && npm run dev
 | `npm run dev` | Dev server on :5173 |
 | `npm run build` | Typecheck + production build to `dist/` |
 | `npm run preview` | Serve the built output |
-| `npm test` | Parser, time, sort, transfer, watched, filter, merge and stats checks (62 cases) |
+| `npm test` | Parser, time, sort, transfer, watched, filter, merge, stats and sync-code checks (65 cases) |
 | `npm run icons` | Regenerate PWA icons |
 
 ## Getting links in
@@ -161,45 +161,65 @@ profile is open, since none of them apply to it.
 
 ## Sync across devices
 
-Optional, and off until you configure it. Without credentials the app is
-local-only and the sync panel says so; nothing else changes.
+No accounts, no email, no passwords. A library is identified by an unguessable
+**sync code**, and every device holding that code shares one library.
 
-Sync is **merge-based**, not last-device-wins, so two devices that were both
-edited while apart reconcile rather than one clobbering the other:
+1. Profile → **Turn on sync**. That generates your code.
+2. **Copy setup link** and open it on your other devices — one tap and they
+   join. Or paste the code in by hand.
+
+### How it is kept private
+
+The code is a *capability*, like a private share link: whoever has it can read
+and write that library, and without it the server hands over nothing.
+
+The table itself is not reachable with the public key. Row level security is on
+with **no policies**, which denies direct access to everyone, and the anon role
+has its table grants revoked. The only way in is two security-definer functions
+that require the exact id:
+
+```
+library_pull(p_id uuid)            -> the library, or [] if unknown
+library_push(p_id uuid, p_items)   -> writes it, rejecting non-array input
+```
+
+So the public key can never list, enumerate or scan libraries — only address one
+it already knows. Guessing a v4 UUID is a 2^122 search, which is not a practical
+attack.
+
+The honest trade: **there is no second factor.** Anyone who obtains your code
+has your library, and you cannot revoke it short of turning sync on again to get
+a new one. Do not post it publicly. If you want per-person accounts instead, that
+needs real login — this design deliberately swaps that for zero setup.
+
+### How conflicts are resolved
+
+Merge-based, not last-device-wins, so two devices edited while apart reconcile
+rather than one clobbering the other:
 
 - Every change stamps `updatedAt`; the newer edit wins per item.
 - Deletes leave **tombstones**. Without them a delete on one device is silently
-  undone by the next device that syncs an older copy back — the deletion looks
-  like it "didn't take". Tombstones are pruned after 90 days.
+  undone by the next device that syncs an older copy back. Pruned after 90 days.
 - `addedAt` keeps the earlier value: when you first saved a link is a fact about
   the past, not something a later sync should rewrite.
-- Metadata is treated as a cache, not intent — a placeholder title never
-  overwrites one that resolved on another device.
+- Metadata is a cache, not intent — a placeholder title never overwrites one
+  that resolved on another device.
 - The merge is commutative, so it does not matter which device syncs first.
 
-It runs on sign-in, on tab focus, and every five minutes.
+Sync runs on load, on tab focus, and every five minutes. A write only happens
+when the merge actually differs from what the server had, so idle devices do not
+ping-pong.
 
 ### Setting it up
 
 1. Create a free project at [supabase.com](https://supabase.com).
-2. In **SQL Editor**, run [`supabase-setup.sql`](supabase-setup.sql). It creates
-   the table and the row-level-security policies that scope every row to its
-   owner.
-3. In **Authentication → URL Configuration**, set the Site URL and add a
-   redirect URL of `https://shaharkalderon.github.io/youplay/`, or the magic
-   link will bounce you somewhere else.
-4. From **Project Settings → API**, copy the project URL and the `anon` key.
-5. Add them to the repo under **Settings → Secrets and variables → Actions →
-   Variables** as `SUPABASE_URL` and `SUPABASE_ANON_KEY`, then re-run the
-   deploy workflow.
+2. In **SQL Editor**, run [`supabase-setup.sql`](supabase-setup.sql).
+3. From **Project Settings → API**, copy the project URL and the `anon` key.
+4. Add them as repo **Variables** (`SUPABASE_URL`, `SUPABASE_ANON_KEY`) and
+   re-run the deploy workflow. For local dev, copy `.env.example` to `.env`.
 
-For local development, copy `.env.example` to `.env` and fill in the same two
-values.
-
-Both values are safe to publish. The `anon` key is designed to ship in client
-code; it grants only what the row-level-security policies allow, which is your
-own row and nothing else. It is not a service key — never put the `service_role`
-key in this app.
+The `anon` key is safe to publish — it is designed to ship in client code and
+grants only what the schema above allows. Never put the `service_role` key here.
 
 ## Export and import
 
@@ -258,9 +278,10 @@ src/lib/time.ts       relative + absolute timestamps
 src/lib/transfer.ts   export envelope + defensive import parsing
 src/lib/sync.ts       merge, tombstones, pruning (pure, tested)
 src/lib/stats.ts      profile figures (pure, tested)
-src/lib/remote.ts     pull / merge / push against Supabase
-src/lib/session.ts    sign-in state and sync scheduling
-src/lib/supabase.ts   lazily loaded client, config detection
+src/lib/remote.ts       pull / merge / push
+src/lib/synccode.ts     sync code parsing and storage (pure, tested)
+src/lib/syncsession.ts  code ownership and sync scheduling
+src/lib/supabase.ts     RPC helper and config detection
 src/lib/share.ts      share-target / ?link= intake
 src/lib/open.ts       hand-off back to YouTube / Spotify
 scripts/make-icons.mjs  dependency-free PNG icon generator

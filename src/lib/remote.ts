@@ -1,14 +1,14 @@
 import { getAllItems, replaceAll } from './store.ts'
 import type { LibraryItem } from './store.ts'
-import { getClient } from './supabase.ts'
+import { rpc } from './supabase.ts'
+import { getSyncCode } from './synccode.ts'
 import { mergeItems, pruneTombstones } from './sync.ts'
 
-const TABLE = 'libraries'
-
-export type SyncState =
-  | { status: 'idle'; lastSyncedAt: number | null }
-  | { status: 'syncing'; lastSyncedAt: number | null }
-  | { status: 'error'; lastSyncedAt: number | null; message: string }
+export type SyncState = {
+  status: 'idle' | 'syncing' | 'error'
+  lastSyncedAt: number | null
+  message?: string
+}
 
 let state: SyncState = { status: 'idle', lastSyncedAt: null }
 const listeners = new Set<() => void>()
@@ -30,43 +30,32 @@ let inFlight: Promise<void> | null = null
 /**
  * Pull, merge, push.
  *
- * The merge is the same pure function both devices run, so it does not matter
- * which one syncs first. We only write back when the merge actually differs
- * from what the server already had, to avoid two devices ping-ponging writes.
+ * Both devices run the same pure merge, so it does not matter which syncs
+ * first. We only write back when the result differs from what the server
+ * already had, so two idle devices do not ping-pong writes at each other.
  *
- * Concurrent calls share one run: focus, interval and manual sync all fire at
- * roughly the same moment, and three overlapping round-trips would be pointless.
+ * Overlapping calls share one run: load, focus and the interval often fire at
+ * once, and three simultaneous round-trips would achieve nothing.
  */
 export function syncNow(): Promise<void> {
   if (inFlight) return inFlight
 
+  const code = getSyncCode()
+  if (!code) return Promise.resolve()
+
   inFlight = (async () => {
     setState({ status: 'syncing', lastSyncedAt: state.lastSyncedAt })
     try {
-      const supabase = await getClient()
-      const { data: auth } = await supabase.auth.getUser()
-      const user = auth.user
-      if (!user) throw new Error('Not signed in.')
+      const remoteRaw = await rpc<LibraryItem[] | null>('library_pull', { p_id: code })
+      const remote = Array.isArray(remoteRaw) ? remoteRaw : []
 
-      const { data, error } = await supabase
-        .from(TABLE)
-        .select('items')
-        .eq('user_id', user.id)
-        .maybeSingle()
-      if (error) throw error
-
-      const remote: LibraryItem[] = Array.isArray(data?.items) ? data.items : []
-      const local = getAllItems()
-      const merged = pruneTombstones(mergeItems(local, remote))
+      const merged = pruneTombstones(mergeItems(getAllItems(), remote))
 
       // Local first: the merge may have brought in items or deletions.
       replaceAll(merged)
 
       if (!sameLibrary(merged, remote)) {
-        const { error: writeError } = await supabase
-          .from(TABLE)
-          .upsert({ user_id: user.id, items: merged }, { onConflict: 'user_id' })
-        if (writeError) throw writeError
+        await rpc<string>('library_push', { p_id: code, p_items: merged })
       }
 
       setState({ status: 'idle', lastSyncedAt: Date.now() })

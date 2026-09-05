@@ -1,35 +1,38 @@
 import { libraryStats } from '../lib/stats.ts'
 import type { LibraryItem } from '../lib/store.ts'
-import type { Account } from '../lib/session.ts'
 import { absoluteTime, relativeTime } from '../lib/time.ts'
 import { SyncPanel } from './SyncPanel'
 import { Setup } from './Setup'
 
 type Props = {
   items: LibraryItem[]
-  account: Account
+  sync: {
+    code: string | null
+    enable: () => void
+    join: (input: string) => boolean
+    disable: () => void
+  }
   onOpenData: () => void
 }
 
 const dateLine = (timestamp: number | null) =>
   timestamp === null ? '—' : relativeTime(timestamp)
 
-export function Profile({ items, account, onOpenData }: Props) {
+export function Profile({ items, sync, onOpenData }: Props) {
   const stats = libraryStats(items)
-  const initial = (account?.email ?? 'Y').trim().charAt(0).toUpperCase()
 
   return (
     <div className="profile">
       <header className="profile-head">
         <div className="profile-avatar" aria-hidden="true">
-          {initial}
+          Y
         </div>
         <div>
-          <h1>{account?.email ?? 'Your library'}</h1>
+          <h1>Your library</h1>
           <p>
-            {account
-              ? 'Signed in — your library syncs across devices.'
-              : 'Stored on this device. Sign in below to sync.'}
+            {sync.code
+              ? 'Syncing across every device that has your code.'
+              : 'Stored on this device only. Turn on sync below.'}
           </p>
         </div>
       </header>
@@ -109,7 +112,12 @@ export function Profile({ items, account, onOpenData }: Props) {
       </section>
 
       <section className="profile-section">
-        <SyncPanel account={account} />
+        <SyncPanel
+          code={sync.code}
+          onEnable={sync.enable}
+          onJoin={sync.join}
+          onDisable={sync.disable}
+        />
       </section>
 
       <section className="profile-section">

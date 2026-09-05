@@ -669,6 +669,37 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, 0.6); }
 
 .sync-form input:focus { border-color: #3ea6ff; }
 
+.field-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.code-row { display: flex; gap: 8px; }
+
+.code-row input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0 12px;
+  background: #121212;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.code-row .btn { flex-shrink: 0; }
+
+.hint.warn {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 176, 32, 0.1);
+  border: 1px solid rgba(255, 176, 32, 0.25);
+  color: #f0c070;
+}
+
 .sheet-divider {
   height: 1px;
   margin: 4px 0;

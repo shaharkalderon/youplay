@@ -7,6 +7,7 @@ import { buildExport, exportFilename, parseImport } from '../src/lib/transfer.ts
 import { DEFAULT_FILTER, FILTERS, findFilter, isFilterId } from '../src/lib/filters.ts'
 import { mergeItems, pruneTombstones, liveItems, TOMBSTONE_TTL_MS } from '../src/lib/sync.ts'
 import { libraryStats } from '../src/lib/stats.ts'
+import { isSyncCode, normaliseSyncCode } from '../src/lib/synccode.ts'
 
 let passed = 0
 const check = (name: string, fn: () => void) => {
@@ -434,6 +435,30 @@ check('watched percent rounds', () => {
     statItem({ key: 'c', watchedAt: null }),
   ])
   assert.equal(s.watchedPercent, 33)
+})
+
+// --- sync codes ---
+const CODE = '3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b'
+
+check('valid codes are recognised', () => {
+  assert.equal(isSyncCode(CODE), true)
+  assert.equal(normaliseSyncCode(CODE), CODE)
+  assert.equal(normaliseSyncCode(`  ${CODE.toUpperCase()}  `), CODE)
+})
+
+check('a pasted setup link yields the code', () => {
+  assert.equal(
+    normaliseSyncCode(`https://shaharkalderon.github.io/youplay/?sync=${CODE}`),
+    CODE
+  )
+})
+
+check('rubbish is rejected rather than half-accepted', () => {
+  for (const bad of ['', '   ', 'not-a-code', CODE.slice(0, -1), `${CODE}extra`, '12345']) {
+    assert.equal(normaliseSyncCode(bad), null, `should reject ${JSON.stringify(bad)}`)
+  }
+  assert.equal(isSyncCode(null), false)
+  assert.equal(isSyncCode(42), false)
 })
 
 console.log(`${passed} checks passed`)

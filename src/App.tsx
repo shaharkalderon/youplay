@@ -10,7 +10,7 @@ import { SortControl } from './components/SortControl'
 import { DEFAULT_FILTER, FILTERS, findFilter } from './lib/filters.ts'
 import { parseLink } from './lib/links.ts'
 import { setFilterId, useFilterId, useLayout, useSortOrder } from './lib/preferences.ts'
-import { useAccount } from './lib/session.ts'
+import { useSync } from './lib/syncsession.ts'
 import { sortItems } from './lib/sort.ts'
 import { clearShareParams, readSharedLink } from './lib/share.ts'
 import {
@@ -27,7 +27,7 @@ type Toast = { message: string; tone: 'ok' | 'error' } | null
 export default function App() {
   const items = useLibrary()
   const layout = useLayout()
-  const { account } = useAccount()
+  const sync = useSync()
   const sortOrder = useSortOrder()
   const [query, setQuery] = useState('')
   const filterId = useFilterId()
@@ -221,11 +221,7 @@ export default function App() {
 
       <main>
         {showProfile ? (
-          <Profile
-            items={items}
-            account={account}
-            onOpenData={() => setDataOpen(true)}
-          />
+          <Profile items={items} sync={sync} onOpenData={() => setDataOpen(true)} />
         ) : visible.length === 0 ? (
           <EmptyState
             filtered={items.length > 0}
