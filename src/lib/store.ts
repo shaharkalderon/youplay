@@ -25,7 +25,10 @@ export type LibraryItem = ParsedLink & {
   deletedAt: number | null
   /** True once oEmbed has actually answered; false means we are showing a placeholder. */
   resolved: boolean
-  /** True while a lookup is in flight, so the card can show a loading hint. */
+  /**
+   * True while a metadata lookup is in flight, so the card can show a hint.
+   * Purely transient: never persisted and never synced — see `inFlight`.
+   */
   resolving?: boolean
 }
 
@@ -33,6 +36,18 @@ const STORAGE_KEY = 'youplay.library.v1'
 
 let items: LibraryItem[] = load()
 const listeners = new Set<() => void>()
+
+/**
+ * Keys with a metadata lookup running right now.
+ *
+ * This lives in memory rather than on the item because `resolving` must never
+ * outlive the page. It used to be written to storage and pushed to the server,
+ * which deadlocked sync: a device that pushed an item mid-lookup published
+ * `resolving: true`, every later merge pulled that back, and the retry pass
+ * skips anything already marked resolving — so the title could never resolve
+ * again on any device.
+ */
+const inFlight = new Set<string>()
 
 function load(): LibraryItem[] {
   try {
@@ -58,7 +73,7 @@ function load(): LibraryItem[] {
 function commit(next: LibraryItem[]) {
   items = next
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stripTransient(items)))
   } catch {
     // Quota or private-mode failures must not take the in-memory library down.
   }
@@ -87,13 +102,19 @@ export function getItems(): LibraryItem[] {
   return liveCache
 }
 
+/** Drops fields that describe this tab's activity rather than the library. */
+export const stripTransient = (list: LibraryItem[]): LibraryItem[] =>
+  list.map(({ resolving: _resolving, ...rest }) => rest)
+
 /** Everything, tombstones included — for sync and merging only. */
-export const getAllItems = () => items
+export const getAllItems = () => stripTransient(items)
 
 /** Applies a merged library wholesale. Used by sync, which has already
  *  reconciled local and remote state. */
 export function replaceAll(next: LibraryItem[]) {
-  commit(next)
+  // Incoming items describe the library, not this tab, so the flag is rebuilt
+  // from what is genuinely running here.
+  commit(next.map((item) => ({ ...item, resolving: inFlight.has(item.key) })))
   // A merge can bring in items from another device that never resolved there.
   retryUnresolved()
 }
@@ -131,11 +152,14 @@ export function addLink(link: ParsedLink): LibraryItem | null {
 }
 
 async function resolve(item: LibraryItem) {
+  inFlight.add(item.key)
   try {
     const meta = await fetchMetadata(item)
     patch(item.key, { ...meta, resolved: true, resolving: false })
   } catch {
     patch(item.key, { resolving: false })
+  } finally {
+    inFlight.delete(item.key)
   }
 }
 
@@ -175,7 +199,9 @@ export function importItems(incoming: LibraryItem[]): { added: number; duplicate
 export function toggleWatched(key: string) {
   const item = items.find((entry) => entry.key === key)
   if (!item) return
-  patch(key, { watchedAt: item.watchedAt ? null : Date.now() })
+  // `touch` is essential: without a bumped updatedAt this edit loses every
+  // merge, so watching something on one device would vanish when another synced.
+  patch(key, { watchedAt: item.watchedAt ? null : Date.now() }, true)
 }
 
 /** Soft delete: the tombstone is what lets the removal survive a sync. */
@@ -190,7 +216,9 @@ export function removeItem(key: string) {
  * kills the in-flight lookup — so unresolved items are retried on every load.
  */
 export function retryUnresolved() {
-  const pending = getItems().filter((item) => !item.resolved && !item.resolving)
+  // Trust the in-memory set, not the item flag: a merged-in item can arrive
+  // carrying a stale flag from whichever device wrote it.
+  const pending = getItems().filter((item) => !item.resolved && !inFlight.has(item.key))
   if (pending.length === 0) return
   pending.forEach((item) => {
     patch(item.key, { resolving: true })

@@ -1,4 +1,4 @@
-import { getAllItems, replaceAll } from './store.ts'
+import { getAllItems, replaceAll, stripTransient } from './store.ts'
 import type { LibraryItem } from './store.ts'
 import { rpc } from './supabase.ts'
 import { getSyncCode } from './synccode.ts'
@@ -55,7 +55,7 @@ export function syncNow(): Promise<void> {
       replaceAll(merged)
 
       if (!sameLibrary(merged, remote)) {
-        await rpc<string>('library_push', { p_id: code, p_items: merged })
+        await rpc<string>('library_push', { p_id: code, p_items: stripTransient(merged) })
       }
 
       setState({ status: 'idle', lastSyncedAt: Date.now() })

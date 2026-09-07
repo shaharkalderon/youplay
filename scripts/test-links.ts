@@ -8,6 +8,13 @@ import { DEFAULT_FILTER, FILTERS, findFilter, isFilterId } from '../src/lib/filt
 import { mergeItems, pruneTombstones, liveItems, TOMBSTONE_TTL_MS } from '../src/lib/sync.ts'
 import { libraryStats } from '../src/lib/stats.ts'
 import { isSyncCode, normaliseSyncCode } from '../src/lib/synccode.ts'
+import {
+  addLink,
+  getAllItems,
+  removeItem,
+  stripTransient,
+  toggleWatched,
+} from '../src/lib/store.ts'
 
 let passed = 0
 const check = (name: string, fn: () => void) => {
@@ -459,6 +466,64 @@ check('rubbish is rejected rather than half-accepted', () => {
   }
   assert.equal(isSyncCode(null), false)
   assert.equal(isSyncCode(42), false)
+})
+
+// --- store mutations stamp updatedAt ---
+//
+// Every user edit has to bump updatedAt or it silently loses every sync merge.
+// A watched toggle once shipped without it: the item changed locally and was
+// then reverted by the next device to sync. These guard that path.
+
+const seed = () => {
+  const link = parseLink('https://youtu.be/dQw4w9WgXcQ')!
+  const added = addLink(link)
+  assert.ok(added, 'expected a fresh item')
+  return added
+}
+
+check('adding stamps updatedAt', () => {
+  const item = seed()
+  assert.equal(typeof item.updatedAt, 'number')
+  assert.equal(item.updatedAt, item.addedAt)
+  assert.equal(item.deletedAt, null)
+})
+
+check('marking watched bumps updatedAt', () => {
+  const item = getAllItems().find((i) => i.id === 'dQw4w9WgXcQ')!
+  const before = item.updatedAt
+  toggleWatched(item.key)
+  const after = getAllItems().find((i) => i.key === item.key)!
+  assert.ok(after.watchedAt, 'should now be watched')
+  assert.ok(after.updatedAt >= before, 'updatedAt must move forward')
+  assert.ok(
+    after.updatedAt >= (after.watchedAt as number) - 5,
+    'updatedAt must reflect the moment of the edit, not the original save'
+  )
+})
+
+check('un-watching also bumps updatedAt', () => {
+  const item = getAllItems().find((i) => i.id === 'dQw4w9WgXcQ')!
+  toggleWatched(item.key)
+  const after = getAllItems().find((i) => i.key === item.key)!
+  assert.equal(after.watchedAt, null)
+  assert.ok(after.updatedAt >= item.updatedAt)
+})
+
+check('removing tombstones and stamps rather than dropping the row', () => {
+  const item = getAllItems().find((i) => i.id === 'dQw4w9WgXcQ')!
+  removeItem(item.key)
+  const after = getAllItems().find((i) => i.key === item.key)
+  assert.ok(after, 'the row must survive as a tombstone')
+  assert.ok(after.deletedAt, 'deletedAt must be set')
+  assert.equal(after.updatedAt, after.deletedAt)
+})
+
+check('transient resolving state is never part of the synced payload', () => {
+  const stripped = stripTransient([
+    { key: 'k', resolving: true, title: 't' } as never,
+  ])
+  assert.equal('resolving' in stripped[0], false)
+  assert.equal(getAllItems().some((i) => 'resolving' in i), false)
 })
 
 console.log(`${passed} checks passed`)
