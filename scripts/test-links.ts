@@ -356,6 +356,22 @@ check('merge is commutative', () => {
   assert.deepEqual(byKey(mergeItems(left, right)), byKey(mergeItems(right, left)))
 })
 
+// A tie must not be resolved as "prefer my own copy", or two devices each keep
+// their own version and push it back at each other indefinitely.
+check('a tie on watched state resolves the same way on both devices', () => {
+  const watched = entry('a', { updatedAt: T, watchedAt: T + 10 })
+  const notWatched = entry('a', { updatedAt: T, watchedAt: null })
+  assert.equal(mergeItems([watched], [notWatched])[0].watchedAt, T + 10)
+  assert.equal(mergeItems([notWatched], [watched])[0].watchedAt, T + 10)
+})
+
+check('a tie on metadata prefers the resolved copy', () => {
+  const good = entry('a', { updatedAt: T, resolved: true, title: 'Real' })
+  const placeholder = entry('a', { updatedAt: T, resolved: false, title: 'video · a' })
+  assert.equal(mergeItems([good], [placeholder])[0].title, 'Real')
+  assert.equal(mergeItems([placeholder], [good])[0].title, 'Real')
+})
+
 check('a tie is broken deterministically, deletion first', () => {
   const kept = entry('a', { updatedAt: T })
   const gone = entry('a', { updatedAt: T, deletedAt: T })

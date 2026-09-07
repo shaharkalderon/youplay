@@ -32,11 +32,28 @@ export type SyncSnapshot = {
 
 export const SYNC_VERSION = 1
 
+/**
+ * Ties must resolve to the same winner on every device, never "whichever copy
+ * is local". Preferring the local record looks harmless but is order-dependent:
+ * two devices then each keep their own version and push it back, disagreeing
+ * forever. Equal timestamps do happen — a legacy edit that failed to stamp
+ * updatedAt, or two edits within the same millisecond.
+ */
 function pickWinner(a: LibraryItem, b: LibraryItem): LibraryItem {
   if (a.updatedAt !== b.updatedAt) return a.updatedAt > b.updatedAt ? a : b
-  // Same timestamp on both sides: let deletion win so a delete is never lost to
-  // a coin flip, and so the result does not depend on argument order.
+
+  // A delete is never lost to a coin flip.
   if (Boolean(a.deletedAt) !== Boolean(b.deletedAt)) return a.deletedAt ? a : b
+
+  // Then the further-along watched state: having watched something is a real
+  // action, whereas not having watched it is just the absence of one.
+  const aWatched = a.watchedAt ?? 0
+  const bWatched = b.watchedAt ?? 0
+  if (aWatched !== bWatched) return aWatched > bWatched ? a : b
+
+  // Finally prefer resolved metadata, so a tie never reverts a real title.
+  if (a.resolved !== b.resolved) return a.resolved ? a : b
+
   return a
 }
 
