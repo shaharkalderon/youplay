@@ -1,15 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AddDialog } from './components/AddDialog'
 import { Card } from './components/Card'
+import { ChannelDialog } from './components/ChannelDialog'
 import { DataDialog } from './components/DataDialog'
 import { EmptyState } from './components/EmptyState'
+import { FeedView } from './components/FeedView'
 import { Profile } from './components/Profile'
 import { DataIcon, LogoIcon, PlusIcon, SearchIcon } from './components/Icons'
 import { LayoutSwitcher } from './components/LayoutSwitcher'
 import { SortControl } from './components/SortControl'
+import { useChannels } from './lib/channels.ts'
+import { useFeed } from './lib/feed.ts'
 import { DEFAULT_FILTER, FILTERS, findFilter } from './lib/filters.ts'
 import { parseLink } from './lib/links.ts'
-import { setFilterId, useFilterId, useLayout, useSortOrder } from './lib/preferences.ts'
+import {
+  setFilterId,
+  setView,
+  useFeedDays,
+  useFilterId,
+  useLayout,
+  useSortOrder,
+  useView,
+} from './lib/preferences.ts'
 import { useSync } from './lib/syncsession.ts'
 import { sortItems } from './lib/sort.ts'
 import { clearShareParams, readSharedLink } from './lib/share.ts'
@@ -21,21 +33,35 @@ import {
   toggleWatched,
   useLibrary,
 } from './lib/store.ts'
+import { isYouTubeConfigured, looksLikeChannelLink, watchUrl, type FeedVideo } from './lib/youtube.ts'
 
 type Toast = { message: string; tone: 'ok' | 'error' } | null
 
+type ChannelDialogState = { open: boolean; input?: string }
+
 export default function App() {
   const items = useLibrary()
+  const channels = useChannels()
   const layout = useLayout()
   const sync = useSync()
   const sortOrder = useSortOrder()
+  const view = useView()
+  const feedDays = useFeedDays()
+  const feed = useFeed(channels, Number(feedDays))
   const [query, setQuery] = useState('')
   const filterId = useFilterId()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dataOpen, setDataOpen] = useState(false)
+  const [channelDialog, setChannelDialog] = useState<ChannelDialogState>({ open: false })
   const [showProfile, setShowProfile] = useState(false)
   const [toast, setToast] = useState<Toast>(null)
   const consumedShare = useRef(false)
+
+  // The feed is offered once it can do something: a key to fetch with, or
+  // channels already followed (synced from a device that has one).
+  const feedAvailable = isYouTubeConfigured || channels.length > 0
+  // A remembered "feed" view must not strand you on a screen with no way out.
+  const onFeed = view === 'feed' && feedAvailable && !showProfile
 
   // Intake from the share target / ?link= hand-off, once per load.
   useEffect(() => {
@@ -63,6 +89,11 @@ export default function App() {
     clearShareParams()
 
     if (!shared.link) {
+      // Sharing a channel from the YouTube app lands here: follow it instead.
+      if (looksLikeChannelLink(shared.raw)) {
+        setChannelDialog({ open: true, input: shared.raw })
+        return
+      }
       setToast({ message: 'That share had no YouTube or Spotify link in it.', tone: 'error' })
       return
     }
@@ -99,6 +130,13 @@ export default function App() {
             ? { message: 'Pasted into your library', tone: 'ok' }
             : { message: 'Already in your library', tone: 'ok' }
         )
+        return
+      }
+
+      // A channel link is not something to save — it is something to follow.
+      if (looksLikeChannelLink(text)) {
+        event.preventDefault()
+        setChannelDialog({ open: true, input: text })
         return
       }
 
@@ -148,6 +186,16 @@ export default function App() {
     )
   }
 
+  function handleSaveVideo(video: FeedVideo) {
+    const link = parseLink(watchUrl(video.videoId))
+    const added = link ? addLink(link) : null
+    setToast(
+      added
+        ? { message: 'Saved to your library', tone: 'ok' }
+        : { message: 'Already in your library', tone: 'ok' }
+    )
+  }
+
   return (
     <>
       <header className="header">
@@ -163,16 +211,16 @@ export default function App() {
         </button>
 
         {!showProfile && (
-        <div className="search">
-          <SearchIcon />
-          <input
-            type="search"
-            placeholder="Search your library"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            aria-label="Search your library"
-          />
-        </div>
+          <div className="search">
+            <SearchIcon />
+            <input
+              type="search"
+              placeholder={onFeed ? 'Search new videos' : 'Search your library'}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              aria-label={onFeed ? 'Search new videos' : 'Search your library'}
+            />
+          </div>
         )}
 
         {!showProfile && <LayoutSwitcher value={layout} />}
@@ -193,35 +241,65 @@ export default function App() {
         </button>
       </header>
 
-      {items.length > 0 && !showProfile && (
+      {!showProfile && (items.length > 0 || feedAvailable) && (
         <div className="chips-row">
-          <nav className="chips" aria-label="Filter library">
-            {FILTERS.map((filter) => {
-              const count = items.filter(filter.match).length
-              // A chip with nothing in it is hidden, unless it is the one
-              // currently selected — a vanishing selection is worse than a zero.
-              if (count === 0 && filter.id !== 'all' && filter.id !== filterId) return null
-              return (
-                <button
-                  key={filter.id}
-                  className="chip"
-                  aria-pressed={filter.id === filterId}
-                  onClick={() => setFilterId(filter.id)}
-                >
-                  {filter.label}
-                  <span className="count">{count}</span>
-                </button>
-              )
-            })}
+          <nav className="chips" aria-label="Views and filters">
+            {feedAvailable && (
+              <button
+                className="chip chip-new"
+                aria-pressed={onFeed}
+                onClick={() => setView('feed')}
+                title="New uploads from channels you follow"
+              >
+                New
+                <span className="count">{feed.videos.length}</span>
+              </button>
+            )}
+
+            {items.length > 0 &&
+              FILTERS.map((filter) => {
+                const count = items.filter(filter.match).length
+                // A chip with nothing in it is hidden, unless it is the one
+                // currently selected — a vanishing selection is worse than a zero.
+                if (count === 0 && filter.id !== 'all' && filter.id !== filterId) return null
+                return (
+                  <button
+                    key={filter.id}
+                    className="chip"
+                    aria-pressed={!onFeed && filter.id === filterId}
+                    onClick={() => {
+                      setView('library')
+                      setFilterId(filter.id)
+                    }}
+                  >
+                    {filter.label}
+                    <span className="count">{count}</span>
+                  </button>
+                )
+              })}
           </nav>
 
-          <SortControl value={sortOrder} />
+          {/* The feed is always newest first; sorting belongs to the library. */}
+          {!onFeed && items.length > 0 && <SortControl value={sortOrder} />}
         </div>
       )}
 
       <main>
         {showProfile ? (
           <Profile items={items} sync={sync} onOpenData={() => setDataOpen(true)} />
+        ) : onFeed ? (
+          <FeedView
+            channels={channels}
+            videos={feed.videos}
+            status={feed.status}
+            days={feedDays}
+            layout={layout}
+            query={query}
+            library={items}
+            onRefresh={() => void feed.refresh()}
+            onAddChannel={() => setChannelDialog({ open: true })}
+            onSave={handleSaveVideo}
+          />
         ) : visible.length === 0 ? (
           <EmptyState
             filtered={items.length > 0}
@@ -247,6 +325,16 @@ export default function App() {
       <AddDialog open={dialogOpen} onClose={() => setDialogOpen(false)} onAdd={handleAdd} />
 
       <DataDialog open={dataOpen} onClose={() => setDataOpen(false)} items={items} />
+
+      <ChannelDialog
+        open={channelDialog.open}
+        initialInput={channelDialog.input}
+        onClose={() => setChannelDialog({ open: false })}
+        onFollowed={(channel) => {
+          setToast({ message: `Following ${channel.title}`, tone: 'ok' })
+          setView('feed')
+        }}
+      />
 
       {toast && (
         <div className={`toast ${toast.tone === 'error' ? 'error' : ''}`} role="status">

@@ -991,3 +991,171 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, 0.6); }
   .profile { padding: 16px 12px 80px; gap: 26px; }
   .brand { font-size: 0; padding: 6px; }
 }
+
+/* ---------- New feed ---------- */
+
+.chip-new { display: inline-flex; align-items: center; gap: 6px; }
+
+.chip-new::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--yt);
+}
+
+.chip-new .count { margin-left: 0; }
+
+.feed-head { display: grid; gap: 12px; padding: 4px 16px 14px; }
+
+.feed-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--chip);
+  border-radius: 999px;
+}
+
+.segment {
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.segment:hover { color: var(--text); }
+
+.segment[aria-pressed="true"] { background: var(--text); color: #0f0f0f; }
+
+.feed-status { margin-right: auto; font-size: 12.5px; color: var(--text-dim); }
+
+.btn.small { height: 32px; padding: 0 14px; font-size: 13px; }
+
+.channel-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.channel-strip::-webkit-scrollbar { display: none; }
+
+.channel-pill {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 4px 0 4px;
+  border: none;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.channel-pill img,
+.channel-initial {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.channel-initial {
+  display: grid;
+  place-items: center;
+  background: var(--yt);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.channel-name {
+  max-width: 150px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.channel-remove {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-dim);
+}
+
+.channel-remove:hover { background: var(--surface-hover); color: var(--text); }
+
+.channel-remove svg { width: 12px; height: 12px; }
+
+/* A channel whose last fetch failed; its tooltip carries the reason. */
+.channel-pill.has-error { box-shadow: inset 0 0 0 1px rgba(255, 128, 128, 0.6); }
+
+.channel-pill.add {
+  padding: 0 14px 0 10px;
+  background: var(--chip);
+  cursor: pointer;
+}
+
+.channel-pill.add:hover { background: var(--surface-hover); }
+
+.banner.error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 128, 128, 0.1);
+  border: 1px solid rgba(255, 128, 128, 0.3);
+  color: #ff9c9c;
+  font-size: 13.5px;
+}
+
+.avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+/* In the dense rows layout the avatar is a colour dot; an image would be noise. */
+.grid.layout-rows .avatar img { display: none; }
+
+/* Saved-but-not-watched uses the watched badge's position with its own colour. */
+.thumb .saved-badge { background: rgba(62, 166, 255, 0.92); }
+
+.tool.is-saved { background: var(--sp); color: #0f0f0f; cursor: default; }
+
+.channel-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #121212;
+}
+
+.channel-preview img,
+.channel-preview .channel-initial { width: 48px; height: 48px; }
+
+.channel-preview div { display: grid; gap: 2px; min-width: 0; }
+
+.channel-preview strong { font-size: 15px; }
+
+@media (max-width: 600px) {
+  .feed-head { padding: 4px 10px 12px; }
+  .feed-status { order: 3; width: 100%; }
+}

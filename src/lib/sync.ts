@@ -32,6 +32,43 @@ export type SyncSnapshot = {
 
 export const SYNC_VERSION = 1
 
+export type SyncRecord = {
+  key: string
+  addedAt: number
+  updatedAt: number
+  deletedAt: number | null
+}
+
+/**
+ * The part of conflict resolution every synced record shares: the newer edit
+ * wins, and on a tie a delete is never lost to a coin flip. Returns null when
+ * that does not decide it, so each record type can add its own tie-breaks.
+ */
+function pickByTime<T extends SyncRecord>(a: T, b: T): T | null {
+  if (a.updatedAt !== b.updatedAt) return a.updatedAt > b.updatedAt ? a : b
+  if (Boolean(a.deletedAt) !== Boolean(b.deletedAt)) return a.deletedAt ? a : b
+  return null
+}
+
+/** JSON with sorted keys, so two devices serialise the same record identically
+ *  even when they built its object in a different property order. */
+function stableKey(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) =>
+    inner && typeof inner === 'object' && !Array.isArray(inner)
+      ? Object.fromEntries(
+          Object.entries(inner as Record<string, unknown>).sort(([x], [y]) =>
+            x < y ? -1 : x > y ? 1 : 0
+          )
+        )
+      : inner
+  )
+}
+
+/** Last resort for a true tie: decide on content, which every device agrees on. */
+function byContent<T>(a: T, b: T): T {
+  return stableKey(a) >= stableKey(b) ? a : b
+}
+
 /**
  * Ties must resolve to the same winner on every device, never "whichever copy
  * is local". Preferring the local record looks harmless but is order-dependent:
@@ -40,10 +77,8 @@ export const SYNC_VERSION = 1
  * updatedAt, or two edits within the same millisecond.
  */
 function pickWinner(a: LibraryItem, b: LibraryItem): LibraryItem {
-  if (a.updatedAt !== b.updatedAt) return a.updatedAt > b.updatedAt ? a : b
-
-  // A delete is never lost to a coin flip.
-  if (Boolean(a.deletedAt) !== Boolean(b.deletedAt)) return a.deletedAt ? a : b
+  const byTime = pickByTime(a, b)
+  if (byTime) return byTime
 
   // Then the further-along watched state: having watched something is a real
   // action, whereas not having watched it is just the absence of one.
@@ -51,10 +86,12 @@ function pickWinner(a: LibraryItem, b: LibraryItem): LibraryItem {
   const bWatched = b.watchedAt ?? 0
   if (aWatched !== bWatched) return aWatched > bWatched ? a : b
 
-  // Finally prefer resolved metadata, so a tie never reverts a real title.
+  // Prefer resolved metadata, so a tie never reverts a real title.
   if (a.resolved !== b.resolved) return a.resolved ? a : b
 
-  return a
+  // Anything still different — a title YouTube has since renamed, say — is
+  // settled on content rather than by keeping the local copy.
+  return byContent(a, b)
 }
 
 function reconcile(a: LibraryItem, b: LibraryItem): LibraryItem {
@@ -92,12 +129,33 @@ export function mergeItems(local: LibraryItem[], remote: LibraryItem[]): Library
   return [...byKey.values()]
 }
 
+/**
+ * The same merge for any other synced list — currently followed channels.
+ * Timestamps and tombstones decide it; a true tie is settled on content.
+ */
+export function mergeRecords<T extends SyncRecord>(local: T[], remote: T[]): T[] {
+  const byKey = new Map<string, T>()
+
+  for (const record of [...local, ...remote]) {
+    const existing = byKey.get(record.key)
+    if (!existing) {
+      byKey.set(record.key, record)
+      continue
+    }
+    const winner = pickByTime(existing, record) ?? byContent(existing, record)
+    byKey.set(record.key, { ...winner, addedAt: Math.min(existing.addedAt, record.addedAt) })
+  }
+
+  return [...byKey.values()]
+}
+
 /** Drops tombstones old enough that every device has surely seen them. */
-export function pruneTombstones(items: LibraryItem[], now = Date.now()): LibraryItem[] {
+export function pruneTombstones<T extends SyncRecord>(items: T[], now = Date.now()): T[] {
   return items.filter(
     (item) => !item.deletedAt || now - item.deletedAt < TOMBSTONE_TTL_MS
   )
 }
 
-/** The live library: what the UI shows. */
-export const liveItems = (items: LibraryItem[]) => items.filter((item) => !item.deletedAt)
+/** The live records: what the UI shows. */
+export const liveItems = <T extends { deletedAt: number | null }>(items: T[]) =>
+  items.filter((item) => !item.deletedAt)

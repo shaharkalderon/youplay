@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { getSyncState, subscribeSync, syncNow } from '../lib/remote.ts'
 import { isSyncConfigured } from '../lib/supabase.ts'
+import { isYouTubeConfigured } from '../lib/youtube.ts'
 import { syncLink } from '../lib/synccode.ts'
 import { relativeTime } from '../lib/time.ts'
 
@@ -107,6 +108,13 @@ export function SyncPanel({ code, onEnable, onJoin, onDisable }: Props) {
         {sync.status === 'idle' &&
           (sync.lastSyncedAt ? `Synced ${relativeTime(sync.lastSyncedAt)}.` : 'Not synced yet.')}
       </p>
+
+      {sync.channels === 'needs-setup' && isYouTubeConfigured && (
+        <p className="hint warn">
+          Your followed channels are not syncing yet. Run the updated supabase-setup.sql in
+          Supabase to turn that on — the library itself is syncing normally.
+        </p>
+      )}
 
       <label className="field-label" htmlFor="sync-code">
         Your sync code

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { kindLabel, parseLink } from '../lib/links.ts'
 import { has } from '../lib/store.ts'
+import { looksLikeChannelLink } from '../lib/youtube.ts'
 
 type Props = {
   open: boolean
@@ -82,7 +83,13 @@ export function AddDialog({ open, onClose, onAdd }: Props) {
           onChange={(event) => setValue(event.target.value)}
         />
 
-        {invalid && <p className="error">That is not a YouTube or Spotify link we recognise.</p>}
+        {invalid && (
+          <p className="error">
+            {looksLikeChannelLink(value)
+              ? 'That is a channel, not a video. Follow it from the New tab instead.'
+              : 'That is not a YouTube or Spotify link we recognise.'}
+          </p>
+        )}
         {parsed && !duplicate && (
           <p>
             Detected: <strong>{parsed.platform === 'youtube' ? 'YouTube' : 'Spotify'}</strong>{' '}

@@ -69,3 +69,56 @@ grant execute on function public.library_push(uuid, jsonb) to anon;
 
 -- The earlier per-user table is no longer used. Uncomment to remove it:
 -- drop table if exists public.libraries;
+
+-- ---------------------------------------------------------------------------
+-- Followed channels (the New feed)
+-- ---------------------------------------------------------------------------
+-- Added after library sync. Everything in this file is safe to re-run, so
+-- running the whole file again simply adds what is missing.
+--
+-- Channels live in their own column with their own pair of functions, so a
+-- device on an older version of the app keeps syncing its library untouched.
+
+alter table public.shared_libraries
+  add column if not exists channels jsonb not null default '[]'::jsonb;
+
+create or replace function public.channels_pull(p_id uuid)
+returns jsonb
+language sql
+security definer
+set search_path = public
+as $$
+  select coalesce(
+    (select channels from public.shared_libraries where id = p_id),
+    '[]'::jsonb
+  );
+$$;
+
+create or replace function public.channels_push(p_id uuid, p_channels jsonb)
+returns timestamptz
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  ts timestamptz;
+begin
+  if jsonb_typeof(p_channels) <> 'array' then
+    raise exception 'channels must be a JSON array';
+  end if;
+
+  insert into public.shared_libraries (id, channels, updated_at)
+       values (p_id, p_channels, now())
+  on conflict (id) do update
+          set channels = excluded.channels,
+              updated_at = now()
+    returning updated_at into ts;
+
+  return ts;
+end;
+$$;
+
+revoke all on function public.channels_pull(uuid)          from public;
+revoke all on function public.channels_push(uuid, jsonb)   from public;
+grant execute on function public.channels_pull(uuid)        to anon;
+grant execute on function public.channels_push(uuid, jsonb) to anon;

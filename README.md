@@ -14,6 +14,7 @@ opens in the app it came from.
 - **Export / import** your library as JSON, so it survives a cleared cache.
 - **Watched state**, turning the pile into a queue you can actually work through.
 - **Profile page** behind the logo: account, sync, library stats and setup help.
+- **New from channels**: follow YouTube channels and see their last 2 days of uploads.
 - **No backend, no API keys, no OAuth.** Titles and artwork come from YouTube's
   and Spotify's public oEmbed endpoints, which allow browser CORS. Your library
   lives in `localStorage` on your device.
@@ -46,7 +47,7 @@ npm install && npm run dev
 | `npm run dev` | Dev server on :5173 |
 | `npm run build` | Typecheck + production build to `dist/` |
 | `npm run preview` | Serve the built output |
-| `npm test` | Parser, time, sort, transfer, watched, filter, merge, stats and sync-code checks (65 cases) |
+| `npm test` | 91 checks: parsing, time, sort, transfer, filters, merge, store, stats, sync codes and the channel feed |
 | `npm run icons` | Regenerate PWA icons |
 
 ## Getting links in
@@ -158,6 +159,73 @@ instructions — which were previously only visible while the library was empty.
 
 The library controls — search, filters, sort and layout — hide while the
 profile is open, since none of them apply to it.
+
+## New from channels
+
+Follow YouTube channels and the **New** chip shows their uploads from the last
+2 days — switchable to 24 hours, 3 or 7 days — newest first, in whichever layout
+you are using. Tap a video to watch it in YouTube; **+** saves it to your
+library. Videos you have already saved show **Saved** or **Watched**.
+
+Add a channel from **New → Add channel** with an `@handle`, a channel URL
+(`/@handle`, `/channel/UC…`, `/user/…`, `/c/…`), or a link to any video from it.
+Pasting or sharing a channel link anywhere in the app opens the same dialog,
+which shows the channel before you commit. This is *follow*, not *subscribe*:
+nothing changes on your YouTube account.
+
+### Where the videos come from
+
+The YouTube Data API v3, called straight from the browser — the API allows this
+site's origin, so there is no proxy. YouTube's RSS feeds would avoid a key, but
+they have been returning 404s widely through 2026.
+
+| Action | Quota cost |
+| --- | --- |
+| Finding a channel | 1 unit (2 when found via one of its videos) |
+| Refreshing a channel | 1 unit: its 50 newest uploads |
+
+Each channel is refetched at most every 30 minutes and the feed is cached on the
+device, so reopening the app is free and switching the window never costs a
+call. The free quota is 10,000 units a day; 50 channels refreshed every 30
+minutes around the clock is about 2,400.
+
+Publish times come from `contentDetails.videoPublishedAt`. The similar-looking
+`snippet.publishedAt` is when a video was *added to the playlist*, and would make
+a re-added old video look brand new. Private and deleted placeholders are
+skipped.
+
+Known limits:
+
+- Shorts are included: the uploads playlist does not tell them apart.
+- A refresh reads a channel's 50 newest uploads; a channel posting more than
+  that inside your window would be cut off.
+- Scheduled premieres are held back until they start.
+
+### Setting up the key
+
+1. [console.cloud.google.com](https://console.cloud.google.com) → create a
+   project.
+2. **APIs & Services → Library → YouTube Data API v3 → Enable.**
+3. **Credentials → Create credentials → API key.**
+4. Restrict it. *Website restrictions:* `https://shaharkalderon.github.io/*` and
+   `http://localhost:5173/*`. *API restrictions:* YouTube Data API v3 only.
+5. Add it as the repo Variable `YOUTUBE_API_KEY` and re-run the deploy; for local
+   development set `VITE_YOUTUBE_API_KEY` in `.env`.
+
+The key ships in the public bundle, like the Supabase anon key. The restrictions
+are what stop other sites spending its quota. If it is ever abused, delete it in
+Google Cloud and make another.
+
+Until a key exists, the New chip does not appear and the rest of the app is
+unchanged.
+
+### Syncing followed channels
+
+Followed channels sync with your sync code, under the same rules as the library:
+the newest edit wins, and unfollowing leaves a tombstone so it survives a sync.
+They use their own column and functions, so **re-run
+[`supabase-setup.sql`](supabase-setup.sql) once** — it is safe to run again.
+Until then the library keeps syncing normally and channels stay on each device.
 
 ## Sync across devices
 
@@ -282,6 +350,9 @@ src/lib/remote.ts       pull / merge / push
 src/lib/synccode.ts     sync code parsing and storage (pure, tested)
 src/lib/syncsession.ts  code ownership and sync scheduling
 src/lib/supabase.ts     RPC helper and config detection
+src/lib/youtube.ts      YouTube API client and response parsing (parsers tested)
+src/lib/channels.ts     followed channels: storage, follow and unfollow
+src/lib/feed.ts         fetching, caching and the feed window
 src/lib/share.ts      share-target / ?link= intake
 src/lib/open.ts       hand-off back to YouTube / Spotify
 scripts/make-icons.mjs  dependency-free PNG icon generator

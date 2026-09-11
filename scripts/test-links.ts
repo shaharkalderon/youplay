@@ -5,7 +5,7 @@ import { relativeTime } from '../src/lib/time.ts'
 import { sortItems } from '../src/lib/sort.ts'
 import { buildExport, exportFilename, parseImport } from '../src/lib/transfer.ts'
 import { DEFAULT_FILTER, FILTERS, findFilter, isFilterId } from '../src/lib/filters.ts'
-import { mergeItems, pruneTombstones, liveItems, TOMBSTONE_TTL_MS } from '../src/lib/sync.ts'
+import { mergeItems, mergeRecords, pruneTombstones, liveItems, TOMBSTONE_TTL_MS } from '../src/lib/sync.ts'
 import { libraryStats } from '../src/lib/stats.ts'
 import { isSyncCode, normaliseSyncCode } from '../src/lib/synccode.ts'
 import {
@@ -15,6 +15,15 @@ import {
   stripTransient,
   toggleWatched,
 } from '../src/lib/store.ts'
+import {
+  looksLikeChannelLink,
+  parseChannelInput,
+  parseChannelResponse,
+  parseUploadsResponse,
+  sanitiseResolvedChannel,
+} from '../src/lib/youtube.ts'
+import { buildFeed } from '../src/lib/feed.ts'
+import { addChannel, getAllChannels, getChannels, removeChannel } from '../src/lib/channels.ts'
 
 let passed = 0
 const check = (name: string, fn: () => void) => {
@@ -540,6 +549,260 @@ check('transient resolving state is never part of the synced payload', () => {
   ])
   assert.equal('resolving' in stripped[0], false)
   assert.equal(getAllItems().some((i) => 'resolving' in i), false)
+})
+
+// --- channel input parsing ---
+const RICK = 'UCuAXFkgsw1L7xaCfnd5JJOw'
+
+check('channel links resolve to the right kind of lookup', () => {
+  const cases: [string, string, string][] = [
+    ['@RickAstleyYT', 'handle', 'RickAstleyYT'],
+    ['https://www.youtube.com/@RickAstleyYT', 'handle', 'RickAstleyYT'],
+    ['https://www.youtube.com/@RickAstleyYT/videos', 'handle', 'RickAstleyYT'],
+    ['youtube.com/@RickAstleyYT', 'handle', 'RickAstleyYT'],
+    ['https://m.youtube.com/@RickAstleyYT', 'handle', 'RickAstleyYT'],
+    [`https://www.youtube.com/channel/${RICK}`, 'id', RICK],
+    [RICK, 'id', RICK],
+    ['https://www.youtube.com/user/RickAstleyVEVO', 'username', 'RickAstleyVEVO'],
+    ['https://www.youtube.com/c/RickAstley', 'handle', 'RickAstley'],
+    ['https://youtu.be/dQw4w9WgXcQ', 'video', 'dQw4w9WgXcQ'],
+    ['https://www.youtube.com/shorts/abcdefghijk', 'video', 'abcdefghijk'],
+    ['Watch this: https://www.youtube.com/@RickAstleyYT!', 'handle', 'RickAstleyYT'],
+    ['RickAstleyYT', 'handle', 'RickAstleyYT'],
+  ]
+  for (const [input, by, value] of cases) {
+    assert.deepEqual(parseChannelInput(input), { by, value }, input)
+  }
+})
+
+check('non-ASCII handles survive percent-encoding', () => {
+  assert.deepEqual(parseChannelInput('https://www.youtube.com/@%E3%83%86%E3%82%B9%E3%83%88'), {
+    by: 'handle',
+    value: 'テスト',
+  })
+})
+
+check('things that are not channels are rejected', () => {
+  for (const input of ['', '   ', '@ab', 'hello world', 'https://vimeo.com/123', 'https://open.spotify.com/artist/x']) {
+    assert.equal(parseChannelInput(input), null, JSON.stringify(input))
+  }
+})
+
+// Paste and share use the stricter test, so ordinary text never triggers a lookup.
+check('only unmistakable channel links are routed to "follow"', () => {
+  assert.equal(looksLikeChannelLink('https://www.youtube.com/@RickAstleyYT'), true)
+  assert.equal(looksLikeChannelLink(`see https://youtube.com/channel/${RICK}`), true)
+  assert.equal(looksLikeChannelLink('@RickAstleyYT'), true)
+  assert.equal(looksLikeChannelLink('RickAstleyYT'), false)
+  assert.equal(looksLikeChannelLink('https://youtu.be/dQw4w9WgXcQ'), false)
+  assert.equal(looksLikeChannelLink('just some notes'), false)
+})
+
+// --- API response parsing ---
+check('a channel response yields title, handle, avatar and uploads playlist', () => {
+  const channel = parseChannelResponse({
+    items: [
+      {
+        id: RICK,
+        snippet: {
+          title: 'Rick Astley',
+          customUrl: '@rickastleyyt',
+          thumbnails: {
+            default: { url: 'https://yt3.ggpht.com/small' },
+            medium: { url: 'https://yt3.ggpht.com/medium' },
+          },
+        },
+        contentDetails: { relatedPlaylists: { uploads: 'UUuAXFkgsw1L7xaCfnd5JJOw' } },
+      },
+    ],
+  })
+  assert.deepEqual(channel, {
+    id: RICK,
+    title: 'Rick Astley',
+    handle: '@rickastleyyt',
+    thumbnail: 'https://yt3.ggpht.com/medium',
+    uploadsPlaylistId: 'UUuAXFkgsw1L7xaCfnd5JJOw',
+  })
+})
+
+check('a missing uploads playlist falls back to the UU form of the id', () => {
+  const channel = parseChannelResponse({ items: [{ id: RICK, snippet: { title: 'R' } }] })
+  assert.equal(channel?.uploadsPlaylistId, 'UUuAXFkgsw1L7xaCfnd5JJOw')
+  assert.equal(channel?.handle, null)
+})
+
+check('empty or malformed channel responses give null, not a half channel', () => {
+  assert.equal(parseChannelResponse({ items: [] }), null)
+  assert.equal(parseChannelResponse({}), null)
+  assert.equal(parseChannelResponse(null), null)
+  assert.equal(parseChannelResponse({ items: [{ id: 'not-a-channel-id' }] }), null)
+})
+
+check('channel avatars must be https', () => {
+  const channel = parseChannelResponse({
+    items: [{ id: RICK, snippet: { title: 'R', thumbnails: { medium: { url: 'javascript:alert(1)' } } } }],
+  })
+  assert.equal(channel?.thumbnail, null)
+})
+
+const uploads = {
+  items: [
+    {
+      snippet: {
+        title: 'New song',
+        publishedAt: '2026-09-10T20:00:00Z',
+        resourceId: { kind: 'youtube#video', videoId: 'aaaaaaaaaaa' },
+        thumbnails: { high: { url: 'https://i.ytimg.com/vi/aaaaaaaaaaa/hqdefault.jpg' } },
+        videoOwnerChannelTitle: 'Rick Astley',
+        videoOwnerChannelId: RICK,
+      },
+      contentDetails: { videoId: 'aaaaaaaaaaa', videoPublishedAt: '2026-09-09T08:00:00Z' },
+    },
+    // Private: no publish time, no uploader.
+    {
+      snippet: { title: 'Private video', resourceId: { videoId: 'bbbbbbbbbbb' }, thumbnails: {} },
+      contentDetails: { videoId: 'bbbbbbbbbbb' },
+    },
+    // Deleted, even if a date lingers: the placeholder title with no uploader.
+    {
+      snippet: { title: 'Deleted video', resourceId: { videoId: 'ccccccccccc' } },
+      contentDetails: { videoId: 'ccccccccccc', videoPublishedAt: '2026-09-09T08:00:00Z' },
+    },
+    {
+      snippet: { title: 'No thumbnails', resourceId: { videoId: 'ddddddddddd' } },
+      contentDetails: { videoId: 'ddddddddddd', videoPublishedAt: '2026-09-08T08:00:00Z' },
+    },
+    {
+      snippet: { title: 'Bad id', resourceId: { videoId: 'short' } },
+      contentDetails: { videoId: 'short', videoPublishedAt: '2026-09-08T08:00:00Z' },
+    },
+  ],
+}
+
+check('uploads use the real publish time, not the playlist time', () => {
+  const videos = parseUploadsResponse(uploads, { id: RICK, title: 'Rick Astley' })
+  const first = videos.find((v) => v.videoId === 'aaaaaaaaaaa')!
+  assert.equal(first.publishedAt, Date.parse('2026-09-09T08:00:00Z'))
+  assert.notEqual(first.publishedAt, Date.parse('2026-09-10T20:00:00Z'))
+})
+
+check('private, deleted and malformed uploads are skipped', () => {
+  const ids = parseUploadsResponse(uploads, { id: RICK, title: 'Rick Astley' }).map((v) => v.videoId)
+  assert.deepEqual(ids, ['aaaaaaaaaaa', 'ddddddddddd'])
+})
+
+check('uploads fall back to the channel title and a derived thumbnail', () => {
+  const video = parseUploadsResponse(uploads, { id: RICK, title: 'Rick Astley' }).find(
+    (v) => v.videoId === 'ddddddddddd'
+  )!
+  assert.equal(video.channelTitle, 'Rick Astley')
+  assert.equal(video.thumbnail, 'https://i.ytimg.com/vi/ddddddddddd/hqdefault.jpg')
+  assert.equal(video.channelId, RICK)
+})
+
+check('a stored channel is re-validated, not trusted', () => {
+  assert.equal(sanitiseResolvedChannel({ id: 'nope' }), null)
+  assert.equal(sanitiseResolvedChannel(null), null)
+  const channel = sanitiseResolvedChannel({
+    id: RICK,
+    title: 'R',
+    thumbnail: 'data:x',
+    uploadsPlaylistId: '../../etc',
+  })
+  assert.equal(channel?.thumbnail, null)
+  assert.equal(channel?.uploadsPlaylistId, 'UUuAXFkgsw1L7xaCfnd5JJOw')
+})
+
+// --- the feed window ---
+const FEED_NOW = Date.parse('2026-09-11T12:00:00Z')
+const video = (videoId: string, hoursAgo: number) => ({
+  videoId,
+  title: videoId,
+  channelId: RICK,
+  channelTitle: 'Rick Astley',
+  thumbnail: null,
+  publishedAt: FEED_NOW - hoursAgo * HOUR,
+})
+
+check('the feed keeps the window, newest first, one entry per video', () => {
+  const feed = buildFeed(
+    [
+      video('bbbbbbbbbbb', 30),
+      video('aaaaaaaaaaa', 1),
+      video('ccccccccccc', 72),
+      video('aaaaaaaaaaa', 1),
+      video('ddddddddddd', -2),
+    ],
+    FEED_NOW,
+    2 * DAY
+  )
+  assert.deepEqual(
+    feed.map((v) => v.videoId),
+    ['aaaaaaaaaaa', 'bbbbbbbbbbb']
+  )
+})
+
+check('a video exactly at the window edge is included, one second past is not', () => {
+  const edge = buildFeed([{ ...video('aaaaaaaaaaa', 0), publishedAt: FEED_NOW - DAY }], FEED_NOW, DAY)
+  const past = buildFeed([{ ...video('aaaaaaaaaaa', 0), publishedAt: FEED_NOW - DAY - 1000 }], FEED_NOW, DAY)
+  assert.equal(edge.length, 1)
+  assert.equal(past.length, 0)
+})
+
+// --- generic merge, used for followed channels ---
+const record = (key: string, over: Record<string, unknown> = {}) => ({
+  key,
+  addedAt: T,
+  updatedAt: T,
+  deletedAt: null as number | null,
+  title: 'x',
+  ...over,
+})
+
+check('channel merge: newer edit wins and unfollows stick', () => {
+  const unfollowed = record('a', { updatedAt: T + 10, deletedAt: T + 10 })
+  const stale = record('a', { updatedAt: T })
+  assert.equal(mergeRecords([unfollowed], [stale])[0].deletedAt, T + 10)
+  assert.equal(mergeRecords([stale], [unfollowed])[0].deletedAt, T + 10)
+})
+
+check('channel merge: a true tie resolves the same way on both devices', () => {
+  const left = record('a', { title: 'Old name' })
+  const right = record('a', { title: 'New name' })
+  assert.deepEqual(mergeRecords([left], [right]), mergeRecords([right], [left]))
+})
+
+check('channel merge keeps the earliest follow date', () => {
+  const merged = mergeRecords([record('a', { addedAt: T + 99, updatedAt: T + 99 })], [record('a')])
+  assert.equal(merged[0].addedAt, T)
+})
+
+// --- followed-channels store ---
+const followable = {
+  id: RICK,
+  title: 'Rick Astley',
+  handle: '@rickastleyyt',
+  thumbnail: null,
+  uploadsPlaylistId: 'UUuAXFkgsw1L7xaCfnd5JJOw',
+}
+
+check('following twice is a no-op', () => {
+  assert.ok(addChannel(followable))
+  assert.equal(addChannel(followable), null)
+  assert.equal(getChannels().filter((c) => c.id === RICK).length, 1)
+})
+
+check('unfollowing leaves a stamped tombstone, and following again revives it', () => {
+  removeChannel(RICK)
+  assert.equal(getChannels().some((c) => c.id === RICK), false)
+  const tombstone = getAllChannels().find((c) => c.id === RICK)!
+  assert.ok(tombstone.deletedAt)
+  assert.equal(tombstone.updatedAt, tombstone.deletedAt)
+
+  const revived = addChannel(followable)
+  assert.ok(revived)
+  assert.equal(revived.deletedAt, null)
+  assert.equal(getAllChannels().filter((c) => c.id === RICK).length, 1)
 })
 
 console.log(`${passed} checks passed`)

@@ -24,6 +24,6 @@ import type { LibraryItem } from './store.ts'
  * That path is better tested than anything we could reproduce here, and its
  * worst case is a working web player rather than nothing at all.
  */
-export function openItem(item: LibraryItem) {
+export function openItem(item: Pick<LibraryItem, 'url'>) {
   window.open(item.url, '_blank', 'noopener,noreferrer')
 }

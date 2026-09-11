@@ -57,3 +57,19 @@ export const setSortOrder = sort.set
 const filter = createPreference<FilterId>('youplay.filter.v1', DEFAULT_FILTER, isFilterId)
 export const useFilterId = filter.use
 export const setFilterId = filter.set
+
+/** Which main view is showing: your library, or new uploads from followed channels. */
+export type View = 'library' | 'feed'
+const isView = (value: unknown): value is View => value === 'library' || value === 'feed'
+const view = createPreference<View>('youplay.view.v1', 'library', isView)
+export const useView = view.use
+export const setView = view.set
+
+/** How far back the New feed looks, in days. Stored as a string like every preference. */
+export type FeedDays = '1' | '2' | '3' | '7'
+export const FEED_DAY_OPTIONS: FeedDays[] = ['1', '2', '3', '7']
+const isFeedDays = (value: unknown): value is FeedDays =>
+  FEED_DAY_OPTIONS.includes(value as FeedDays)
+const feedDays = createPreference<FeedDays>('youplay.feedDays.v1', '2', isFeedDays)
+export const useFeedDays = feedDays.use
+export const setFeedDays = feedDays.set
