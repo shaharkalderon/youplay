@@ -6,6 +6,7 @@ import { DataDialog } from './components/DataDialog'
 import { EmptyState } from './components/EmptyState'
 import { FeedView } from './components/FeedView'
 import { Profile } from './components/Profile'
+import { RenameDialog } from './components/RenameDialog'
 import { DataIcon, LogoIcon, PlusIcon, SearchIcon } from './components/Icons'
 import { LayoutSwitcher } from './components/LayoutSwitcher'
 import { SortControl } from './components/SortControl'
@@ -29,9 +30,11 @@ import {
   addLink,
   getItems,
   removeItem,
+  renameItem,
   retryUnresolved,
   toggleWatched,
   useLibrary,
+  type LibraryItem,
 } from './lib/store.ts'
 import { isYouTubeConfigured, looksLikeChannelLink, watchUrl, type FeedVideo } from './lib/youtube.ts'
 
@@ -54,6 +57,7 @@ export default function App() {
   const [dataOpen, setDataOpen] = useState(false)
   const [channelDialog, setChannelDialog] = useState<ChannelDialogState>({ open: false })
   const [showProfile, setShowProfile] = useState(false)
+  const [renaming, setRenaming] = useState<LibraryItem | null>(null)
   const [toast, setToast] = useState<Toast>(null)
   const consumedShare = useRef(false)
 
@@ -319,6 +323,7 @@ export default function App() {
                 item={item}
                 onRemove={removeItem}
                 onToggleWatched={toggleWatched}
+                onRename={setRenaming}
               />
             ))}
           </div>
@@ -328,6 +333,16 @@ export default function App() {
       <AddDialog open={dialogOpen} onClose={() => setDialogOpen(false)} onAdd={handleAdd} />
 
       <DataDialog open={dataOpen} onClose={() => setDataOpen(false)} items={items} />
+
+      <RenameDialog
+        item={renaming}
+        onClose={() => setRenaming(null)}
+        onSave={(title) => {
+          if (renaming) renameItem(renaming.key, title)
+          setRenaming(null)
+          setToast({ message: 'Renamed', tone: 'ok' })
+        }}
+      />
 
       <ChannelDialog
         open={channelDialog.open}

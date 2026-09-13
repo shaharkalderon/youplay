@@ -70,6 +70,20 @@ const prettify = (value: string) =>
 
 const userFromUrl = (url: string, index = 3) => new URL(url).pathname.split('/').filter(Boolean)[index - 3] ?? ''
 
+/**
+ * A short, identifying form of the link for the card's second line.
+ *
+ * Platforms whose metadata a browser may not read would otherwise repeat their
+ * own name there ("Facebook" under "Facebook video"), which tells you nothing
+ * and makes two saved links indistinguishable. The URL is the only identifying
+ * thing left, so it goes there instead.
+ */
+export function compactUrl(link: ParsedLink): string {
+  const url = new URL(link.url)
+  const text = `${bareHost(url)}${url.pathname.replace(/\/+$/, '')}${url.search}`
+  return text.length > 48 ? `${text.slice(0, 47)}…` : text
+}
+
 const YT_ID = /^[\w-]{11}$/
 const YT_LIST = /^[\w-]{12,}$/
 const SPOTIFY_ID = /^[A-Za-z0-9]{22}$/
@@ -253,9 +267,11 @@ const instagram: PlatformInfo = {
     return null
   },
   describe: (link) => {
-    if (link.kind === 'profile') return { title: `@${link.id}`, subtitle: 'Instagram' }
     const noun = link.kind === 'reel' ? 'reel' : link.kind === 'video' ? 'video' : 'post'
-    return { title: `Instagram ${noun}`, subtitle: 'Instagram' }
+    return {
+      title: link.kind === 'profile' ? `@${link.id}` : `Instagram ${noun}`,
+      subtitle: compactUrl(link),
+    }
   },
 }
 
@@ -316,13 +332,17 @@ const facebook: PlatformInfo = {
       : null
   },
   describe: (link) => {
-    if (link.kind === 'profile') return { title: link.id, subtitle: 'Facebook' }
     const noun = link.kind === 'video' ? 'video' : link.kind === 'photo' ? 'photo' : 'post'
     const user = new URL(link.url).pathname.split('/').filter(Boolean)[0]
     const named = user && !['watch', 'share', 'groups', 'photo.php', 'photo'].includes(user)
     return {
-      title: named ? `Facebook ${noun} by ${user}` : `Facebook ${noun}`,
-      subtitle: 'Facebook',
+      title:
+        link.kind === 'profile'
+          ? link.id
+          : named
+            ? `Facebook ${noun} by ${user}`
+            : `Facebook ${noun}`,
+      subtitle: compactUrl(link),
     }
   },
 }
@@ -358,9 +378,10 @@ const threads: PlatformInfo = {
   },
   describe: (link) => {
     const user = new URL(link.url).pathname.split('/').filter(Boolean)[0]?.replace(/^@/, '') ?? ''
-    return link.kind === 'post'
-      ? { title: `Post by @${user}`, subtitle: 'Threads' }
-      : { title: `@${user}`, subtitle: 'Threads' }
+    return {
+      title: link.kind === 'post' ? `Post by @${user}` : `@${user}`,
+      subtitle: compactUrl(link),
+    }
   },
 }
 
@@ -563,8 +584,8 @@ function simple(
       const parts = new URL(link.url).pathname.split('/').filter(Boolean)
       const last = parts[parts.length - 1] ?? ''
       return {
-        title: link.kind === 'profile' ? `${parts[parts.length - 1]}` : prettify(last) || label,
-        subtitle: label,
+        title: link.kind === 'profile' ? last : prettify(last) || label,
+        subtitle: compactUrl(link),
       }
     },
   }
@@ -612,7 +633,7 @@ const generic: PlatformInfo = {
     const parts = url.pathname.split('/').filter(Boolean)
     const host = bareHost(url)
     const last = parts[parts.length - 1]
-    return { title: last ? prettify(last) || host : host, subtitle: host }
+    return { title: last ? prettify(last) || host : host, subtitle: compactUrl(link) }
   },
 }
 

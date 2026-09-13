@@ -120,3 +120,10 @@ export const UndoIcon = () => (
     <path d="M7.5 5.5 4 9l3.5 3.5" />
   </svg>
 )
+
+export const PencilIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16v4Z" />
+    <path d="m13.5 6.5 4 4" />
+  </svg>
+)

@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import type { ParsedLink } from './links.ts'
 import { dedupeKey } from './links.ts'
 import { canFetchMetadata, fetchMetadata, placeholderMetadata } from './metadata.ts'
+import { platformInfo } from './platforms.ts'
 import { liveItems, pruneTombstones } from './sync.ts'
 
 export type LibraryItem = ParsedLink & {
@@ -63,6 +64,14 @@ function load(): LibraryItem[] {
       updatedAt: item.updatedAt ?? item.addedAt ?? Date.now(),
       deletedAt: item.deletedAt ?? null,
       resolving: false,
+      // Items saved before the second line carried the URL still repeat the
+      // platform's own name, which identifies nothing. Recomputed only where
+      // there is no metadata to fetch and nothing was ever fetched, so a real
+      // author is never overwritten. Cosmetic, so it does not stamp an edit.
+      subtitle:
+        !canFetchMetadata(item) && item.subtitle === platformInfo(item.platform).label
+          ? placeholderMetadata(item).subtitle
+          : item.subtitle,
     }))
     return pruneTombstones(restored)
   } catch {
@@ -159,11 +168,15 @@ async function resolve(item: LibraryItem) {
   inFlight.add(item.key)
   try {
     const meta = await fetchMetadata(item)
+    // A rename that landed while this was in flight must not be overwritten by
+    // the title we were fetching; renaming marks the item resolved.
+    if (items.find((entry) => entry.key === item.key)?.resolved) return
     patch(item.key, { ...meta, resolved: true, resolving: false })
   } catch {
     patch(item.key, { resolving: false })
   } finally {
     inFlight.delete(item.key)
+    patch(item.key, { resolving: false })
   }
 }
 
@@ -206,6 +219,21 @@ export function toggleWatched(key: string) {
   // `touch` is essential: without a bumped updatedAt this edit loses every
   // merge, so watching something on one device would vanish when another synced.
   patch(key, { watchedAt: item.watchedAt ? null : Date.now() }, true)
+}
+
+/**
+ * Gives an item your own title.
+ *
+ * Some platforms — Instagram, Facebook, Reddit — publish nothing a browser may
+ * read, so the app can only name a link after its URL. Renaming is the way to
+ * make those items mean something. It counts as user intent, so it is stamped
+ * and wins a sync merge, and it marks the item resolved so no later lookup can
+ * quietly replace your words.
+ */
+export function renameItem(key: string, title: string) {
+  const trimmed = title.trim().slice(0, 200)
+  if (!trimmed) return
+  patch(key, { title: trimmed, resolved: true, resolving: false }, true)
 }
 
 /** Soft delete: the tombstone is what lets the removal survive a sync. */

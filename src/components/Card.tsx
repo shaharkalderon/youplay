@@ -3,16 +3,17 @@ import { platformInfo } from '../lib/platforms.ts'
 import { openItem } from '../lib/open.ts'
 import type { LibraryItem } from '../lib/store.ts'
 import { absoluteTime, relativeTime } from '../lib/time.ts'
-import { CheckIcon, CloseIcon, PlayIcon, UndoIcon } from './Icons'
+import { CheckIcon, CloseIcon, PencilIcon, PlayIcon, UndoIcon } from './Icons'
 
 
 type Props = {
   item: LibraryItem
   onRemove: (key: string) => void
   onToggleWatched: (key: string) => void
+  onRename: (item: LibraryItem) => void
 }
 
-export function Card({ item, onRemove, onToggleWatched }: Props) {
+export function Card({ item, onRemove, onToggleWatched, onRename }: Props) {
   const platform = platformInfo(item.platform)
   const initial = (item.subtitle || platform.label).trim().charAt(0).toUpperCase()
   const watched = item.watchedAt !== null
@@ -107,6 +108,15 @@ export function Card({ item, onRemove, onToggleWatched }: Props) {
           title={watched ? 'Move back to the queue' : 'Mark as watched'}
         >
           {watched ? <UndoIcon /> : <CheckIcon />}
+        </button>
+
+        <button
+          className="tool"
+          onClick={() => onRename(item)}
+          aria-label={`Rename "${item.title}"`}
+          title="Rename"
+        >
+          <PencilIcon />
         </button>
 
         <button

@@ -301,7 +301,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   align-items: center;
   gap: 12px;
   /* Room on the right for the delete control, which sits over the row. */
-  padding: 7px 66px 7px 8px;
+  padding: 7px 92px 7px 8px;
   border-radius: 8px;
   transition: background 120ms ease;
 }
@@ -813,7 +813,7 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, 0.6); }
   /* Title and date only — the channel line is the first thing to give up. */
   .grid.layout-rows .subtitle:not(.added) { display: none; }
 
-  .grid.layout-rows .card { padding-right: 60px; }
+  .grid.layout-rows .card { padding-right: 86px; }
 
   /* Kept on phones — layout choice matters most on a small screen — but
      tightened so the header still fits alongside search and Add. */

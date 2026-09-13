@@ -12,6 +12,7 @@ import {
   addLink,
   getAllItems,
   removeItem,
+  renameItem,
   stripTransient,
   toggleWatched,
 } from '../src/lib/store.ts'
@@ -896,15 +897,17 @@ check('a bare word is still not a link', () => {
 // read, so their titles have to come from the URL itself.
 check('links with no fetchable metadata still get a readable title', () => {
   const cases: [string, string, string][] = [
-    ['https://www.instagram.com/p/CxYz123/', 'Instagram post', 'Instagram'],
-    ['https://www.instagram.com/reel/abc123', 'Instagram reel', 'Instagram'],
-    ['https://www.instagram.com/nasa/', '@nasa', 'Instagram'],
-    ['https://www.facebook.com/nasa/posts/987', 'Facebook post by nasa', 'Facebook'],
+    ['https://www.instagram.com/p/CxYz123/', 'Instagram post', 'instagram.com/p/CxYz123'],
+    ['https://www.instagram.com/reel/abc123', 'Instagram reel', 'instagram.com/reel/abc123'],
+    ['https://www.instagram.com/nasa/', '@nasa', 'instagram.com/nasa'],
+    ['https://www.facebook.com/nasa/posts/987', 'Facebook post by nasa', 'facebook.com/nasa/posts/987'],
+    // Reddit keeps its subreddit: more use than the URL it came from.
     ['https://www.reddit.com/r/pics/comments/haucpf/a_very_good_cat/', 'A very good cat', 'r/pics'],
     ['https://old.reddit.com/r/pics/', 'r/pics', 'Reddit'],
-    ['https://www.threads.net/@zuck/post/C8Xy', 'Post by @zuck', 'Threads'],
+    ['https://www.threads.net/@zuck/post/C8Xy', 'Post by @zuck', 'threads.net/@zuck/post/C8Xy'],
+    // X can be fetched, so its placeholder is only ever shown briefly.
     ['https://x.com/jack/status/20', 'Post by @jack', 'X'],
-    ['https://example.com/some/great-article', 'Great article', 'example.com'],
+    ['https://example.com/some/great-article', 'Great article', 'example.com/some/great-article'],
   ]
   for (const [input, title, subtitle] of cases) {
     const meta = placeholderMetadata(parsed(input))
@@ -1000,6 +1003,41 @@ check('every platform has a filter chip, and posts have their own', () => {
   assert.equal(findFilter('instagram').match(asItem({ platform: 'youtube' })), false)
   assert.equal(findFilter('posts').match(asItem({ kind: 'reel' })), true)
   assert.equal(findFilter('link').label, 'Other links')
+})
+
+// --- renaming ---
+//
+// The only way to name a link from a platform that publishes nothing readable.
+check('renaming keeps your title and protects it from a later lookup', () => {
+  const link = parseLink('https://www.facebook.com/watch/?v=999888777')!
+  const added = addLink(link)!
+  assert.equal(added.title, 'Facebook video')
+  assert.equal(added.subtitle, 'facebook.com/watch?v=999888777')
+
+  renameItem(added.key, '  Mum’s birthday video  ')
+  const after = getAllItems().find((i) => i.key === added.key)!
+  assert.equal(after.title, 'Mum’s birthday video')
+  assert.ok(after.updatedAt >= added.updatedAt, 'a rename is an edit, so it is stamped')
+  assert.equal(after.resolved, true, 'marked resolved so no lookup replaces it')
+})
+
+check('an empty rename is ignored rather than blanking the title', () => {
+  const item = getAllItems().find((i) => i.id === '999888777')!
+  renameItem(item.key, '   ')
+  assert.equal(getAllItems().find((i) => i.key === item.key)!.title, 'Mum’s birthday video')
+})
+
+check('a very long title is capped', () => {
+  const item = getAllItems().find((i) => i.id === '999888777')!
+  renameItem(item.key, 'z'.repeat(500))
+  assert.equal(getAllItems().find((i) => i.key === item.key)!.title.length, 200)
+})
+
+check('your title beats a fetched one on another device', () => {
+  const renamed = entry('rename-key', { updatedAt: T + 500, title: 'My own name', resolved: true })
+  const fetched = entry('rename-key', { updatedAt: T, title: 'Fetched name', resolved: true })
+  assert.equal(mergeItems([renamed], [fetched])[0].title, 'My own name')
+  assert.equal(mergeItems([fetched], [renamed])[0].title, 'My own name')
 })
 
 console.log(`${passed} checks passed`)
