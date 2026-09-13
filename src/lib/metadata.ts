@@ -67,10 +67,30 @@ export function textFromEmbedHtml(html: string): string {
   return text.length > 200 ? `${text.slice(0, 199).trimEnd()}…` : text
 }
 
+/**
+ * Gives each origin its own cache entry for the same oEmbed request.
+ *
+ * X reflects the requesting Origin in its CORS header but sends no
+ * `Vary: Origin`, alongside a hundred-year max-age. A browser therefore caches
+ * one response — CORS header included — and replays it to a different origin,
+ * which is then refused. Seen in production: the deployed site was blocked by
+ * an Access-Control-Allow-Origin of http://localhost:5173, cached from a
+ * development request minutes earlier.
+ *
+ * Every endpoint used here ignores the extra parameter and returns the same
+ * JSON, so this is applied to all of them rather than special-casing X.
+ */
+function perOrigin(endpoint: string): string {
+  const origin = globalThis.location?.origin
+  if (!origin) return endpoint
+  return `${endpoint}${endpoint.includes('?') ? '&' : '?'}_o=${encodeURIComponent(origin)}`
+}
+
 /** The oEmbed endpoint for a link, or null when the platform has none that a
  *  browser may read. */
 export function oembedEndpoint(link: ParsedLink): string | null {
-  return platformInfo(link.platform).oembed?.(link) ?? null
+  const endpoint = platformInfo(link.platform).oembed?.(link)
+  return endpoint ? perOrigin(endpoint) : null
 }
 
 /** Whether fetching real metadata is possible at all. Items where it is not

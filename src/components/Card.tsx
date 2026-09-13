@@ -19,9 +19,10 @@ export function Card({ item, onRemove, onToggleWatched }: Props) {
   // Square artwork (album covers, Instagram posts) is centred over a blurred
   // copy of itself so every tile keeps the same 16:9 rhythm.
   const squareArt = Boolean(platform.squareArt)
-  // Nothing to fetch and nothing fetched: show a branded tile rather than a
-  // shimmer that would never resolve.
-  const blank = !item.thumbnail && item.resolved
+  // Shimmer only while a lookup is genuinely running. A lookup that is
+  // impossible, or that failed, gets the branded tile instead — otherwise a
+  // platform that refuses us would leave the card shimmering forever.
+  const blank = !item.thumbnail && !item.resolving
 
   return (
     <div className={`card-shell ${watched ? 'watched' : ''}`}>
@@ -32,7 +33,7 @@ export function Card({ item, onRemove, onToggleWatched }: Props) {
       >
         <div
           className={`thumb ${squareArt ? 'square' : ''} ${blank ? 'blank' : ''} ${
-            item.thumbnail || item.resolved ? '' : 'skeleton'
+            !item.thumbnail && item.resolving ? 'skeleton' : ''
           }`}
         >
           {item.thumbnail && squareArt && (

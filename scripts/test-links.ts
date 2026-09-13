@@ -935,6 +935,23 @@ check('metadata is only attempted where an endpoint can actually be read', () =>
   }
 })
 
+// X sends no Vary: Origin with a reflected CORS header and a hundred-year
+// max-age, so one origin's cached response was replayed to another and refused.
+// Scoping the URL per origin gives each its own cache entry.
+check('oEmbed requests are scoped to this origin', () => {
+  const scope = globalThis as { location?: { origin: string } }
+  const saved = scope.location
+  scope.location = { origin: 'https://example.test' }
+  try {
+    const endpoint = oembedEndpoint(parseLink('https://x.com/jack/status/20')!)!
+    assert.ok(endpoint.includes('_o=https%3A%2F%2Fexample.test'), endpoint)
+    assert.ok(endpoint.includes(encodeURIComponent('https://x.com/jack/status/20')))
+  } finally {
+    if (saved === undefined) delete scope.location
+    else scope.location = saved
+  }
+})
+
 check('the oEmbed request carries the canonical url', () => {
   const endpoint = oembedEndpoint(parsed('https://twitter.com/jack/status/20?s=46'))!
   assert.ok(endpoint.startsWith('https://publish.x.com/oembed'))
