@@ -24,6 +24,7 @@ import {
   sanitiseResolvedChannel,
 } from '../src/lib/youtube.ts'
 import { buildFeed } from '../src/lib/feed.ts'
+import { tidyTitle } from '../src/lib/preview.ts'
 import {
   canFetchMetadata,
   decodeEntities,
@@ -1038,6 +1039,43 @@ check('your title beats a fetched one on another device', () => {
   const fetched = entry('rename-key', { updatedAt: T, title: 'Fetched name', resolved: true })
   assert.equal(mergeItems([renamed], [fetched])[0].title, 'My own name')
   assert.equal(mergeItems([fetched], [renamed])[0].title, 'My own name')
+})
+
+// --- link previews ---
+//
+// Page titles arrive with the site's name appended and, on Facebook, with
+// engagement counts in front. Both are noise on a card.
+check('a page title is tidied before it reaches a card', () => {
+  assert.equal(
+    tidyTitle('2.8M views · 1.3K reactions | How to share with just friends.'),
+    'How to share with just friends.'
+  )
+  assert.equal(
+    tidyTitle('1.2K views · 340 reactions · 88 comments | Our summer trip'),
+    'Our summer trip'
+  )
+  assert.equal(
+    tidyTitle('A very good cat and his very long afternoon | Reddit'),
+    'A very good cat and his very long afternoon'
+  )
+  assert.equal(tidyTitle('  Spaced   out    title  '), 'Spaced out title')
+})
+
+// Trimming a trailing site name must not eat a short title that merely
+// contains a dash, or a hyphenated name.
+check('tidying leaves short and hyphenated titles alone', () => {
+  assert.equal(tidyTitle('Cats - dogs'), 'Cats - dogs')
+  assert.equal(tidyTitle('React'), 'React')
+  assert.equal(
+    tidyTitle('GitHub - facebook/react: The library for web and native UIs'),
+    'GitHub - facebook/react: The library for web and native UIs'
+  )
+})
+
+check('a tidied title is capped', () => {
+  const out = tidyTitle('y'.repeat(400))
+  assert.ok(out.length <= 200)
+  assert.ok(out.endsWith('…'))
 })
 
 console.log(`${passed} checks passed`)

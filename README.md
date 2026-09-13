@@ -49,7 +49,7 @@ npm install && npm run dev
 | `npm run dev` | Dev server on :5173 |
 | `npm run build` | Typecheck + production build to `dist/` |
 | `npm run preview` | Serve the built output |
-| `npm test` | 100 checks: platforms, parsing, time, sort, transfer, filters, merge, store, stats, sync codes and the channel feed |
+| `npm test` | 108 checks: platforms, parsing, previews, time, sort, transfer, filters, merge, store, stats, sync codes and the channel feed |
 | `npm run icons` | Regenerate PWA icons |
 
 ## Getting links in
@@ -198,6 +198,41 @@ platform's colour rather than a thumbnail that would never load.
 
 X and Bluesky are a special case: they return an empty title, with the post's
 words inside the embed HTML, so the text is unpacked from there.
+
+### Naming the rest
+
+Two things cover the links whose titles cannot be fetched.
+
+**Rename.** Every item has a rename control. Your title is kept: renaming counts
+as an edit, so it is stamped and wins a sync merge, and it stops any later
+lookup replacing your words — including one already in flight. This needs
+nothing set up and works for every platform.
+
+**Link previews (optional).** A page's title is readable by a *server* even
+where a browser is refused, so where Supabase is configured the app asks
+`link_preview` — see [`supabase-setup.sql`](supabase-setup.sql) — to fetch the
+page and return just its title and image. That gives real names for Facebook
+`/watch` links, GitHub, blogs and most ordinary websites. Instagram and Facebook
+*page posts* still give nothing: they serve a login wall or an error to anyone
+who is not signed in.
+
+The trade to weigh: **the link is sent to your own Supabase project** so it can
+be fetched from there. If you would rather that never happen, revoke it and
+rely on renaming:
+
+```sql
+revoke execute on function public.link_preview(text) from anon;
+```
+
+The function is callable by anyone holding the public key, so it is deliberately
+narrow: https only, no credentials in the URL, no non-default ports, and
+private, loopback, link-local and cloud-metadata addresses refused — that last
+one is what stops it reaching anything inside the network. It returns only the
+extracted title and image, never the page. Titles are tidied on arrival, since
+pages append their own site name and Facebook prefixes engagement counts.
+
+Without Supabase, or before the SQL is run, nothing breaks: the request fails
+and the URL-derived title stands.
 
 ### Tidying up links
 
@@ -400,6 +435,7 @@ src/lib/synccode.ts     sync code parsing and storage (pure, tested)
 src/lib/syncsession.ts  code ownership and sync scheduling
 src/lib/supabase.ts     RPC helper and config detection
 src/lib/platforms.ts    per-platform parsing, colours and oEmbed endpoints
+src/lib/preview.ts      server-side title lookup for links browsers cannot read
 src/lib/youtube.ts      YouTube API client and response parsing (parsers tested)
 src/lib/channels.ts     followed channels: storage, follow and unfollow
 src/lib/feed.ts         fetching, caching and the feed window

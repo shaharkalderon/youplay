@@ -1,6 +1,7 @@
 import type { ParsedLink } from './links.ts'
 import { kindLabel } from './links.ts'
 import { platformInfo } from './platforms.ts'
+import { fetchPreview, isPreviewConfigured } from './preview.ts'
 
 export type Metadata = {
   title: string
@@ -93,9 +94,13 @@ export function oembedEndpoint(link: ParsedLink): string | null {
   return endpoint ? perOrigin(endpoint) : null
 }
 
-/** Whether fetching real metadata is possible at all. Items where it is not
- *  are marked resolved on the spot, so nothing retries them forever. */
-export const canFetchMetadata = (link: ParsedLink) => oembedEndpoint(link) !== null
+/**
+ * Whether anything can be fetched for this link: its own oEmbed endpoint, or
+ * failing that the link-preview service. Items where nothing can be fetched are
+ * marked resolved on the spot, so nothing retries them forever.
+ */
+export const canFetchMetadata = (link: ParsedLink) =>
+  oembedEndpoint(link) !== null || isPreviewConfigured
 
 /** Predictable artwork some platforms expose without a lookup. */
 export function fallbackThumbnail(link: ParsedLink): string | null {
@@ -119,7 +124,19 @@ export function placeholderMetadata(link: ParsedLink): Metadata {
 
 export async function fetchMetadata(link: ParsedLink, signal?: AbortSignal): Promise<Metadata> {
   const endpoint = oembedEndpoint(link)
-  if (!endpoint) throw new Error('This platform publishes no readable oEmbed endpoint.')
+  const placeholderText = placeholderMetadata(link)
+
+  // No endpoint of its own: ask the preview service, which reads the page
+  // server-side. Anything it cannot improve keeps the URL-derived text.
+  if (!endpoint) {
+    const preview = await fetchPreview(link)
+    if (!preview) throw new Error('Nothing readable for this link.')
+    return {
+      title: preview.title || placeholderText.title,
+      subtitle: placeholderText.subtitle,
+      thumbnail: preview.image ?? placeholderText.thumbnail,
+    }
+  }
 
   const response = await fetch(endpoint, { signal })
   if (!response.ok) throw new Error(`oEmbed ${response.status}`)
