@@ -88,13 +88,15 @@ export default function App() {
     if (!shared) return
     clearShareParams()
 
+    // Checked before the link itself: now that any URL parses, a channel link
+    // would otherwise be saved as an ordinary link instead of followed.
+    if (looksLikeChannelLink(shared.raw)) {
+      setChannelDialog({ open: true, input: shared.raw })
+      return
+    }
+
     if (!shared.link) {
-      // Sharing a channel from the YouTube app lands here: follow it instead.
-      if (looksLikeChannelLink(shared.raw)) {
-        setChannelDialog({ open: true, input: shared.raw })
-        return
-      }
-      setToast({ message: 'That share had no YouTube or Spotify link in it.', tone: 'error' })
+      setToast({ message: 'That share had no link in it.', tone: 'error' })
       return
     }
     const added = addLink(shared.link)
@@ -121,6 +123,14 @@ export default function App() {
       const text = event.clipboardData?.getData('text')?.trim()
       if (!text) return
 
+      // A channel link is not something to save — it is something to follow.
+      // This has to come first: the generic parser would otherwise claim it.
+      if (looksLikeChannelLink(text)) {
+        event.preventDefault()
+        setChannelDialog({ open: true, input: text })
+        return
+      }
+
       const link = parseLink(text)
       if (link) {
         event.preventDefault()
@@ -133,17 +143,10 @@ export default function App() {
         return
       }
 
-      // A channel link is not something to save — it is something to follow.
-      if (looksLikeChannelLink(text)) {
-        event.preventDefault()
-        setChannelDialog({ open: true, input: text })
-        return
-      }
-
       // Only complain when the clipboard plausibly held a link — copying
       // ordinary text and pasting by reflex should stay silent.
       if (/^(https?:\/\/|spotify:)/i.test(text)) {
-        setToast({ message: 'Not a YouTube or Spotify link.', tone: 'error' })
+        setToast({ message: 'That does not look like a link.', tone: 'error' })
       }
     }
 
@@ -174,7 +177,7 @@ export default function App() {
   function handleAdd(raw: string) {
     const link = parseLink(raw)
     if (!link) {
-      setToast({ message: 'Not a YouTube or Spotify link.', tone: 'error' })
+      setToast({ message: 'That does not look like a link.', tone: 'error' })
       return
     }
     const added = addLink(link)

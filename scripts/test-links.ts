@@ -23,6 +23,13 @@ import {
   sanitiseResolvedChannel,
 } from '../src/lib/youtube.ts'
 import { buildFeed } from '../src/lib/feed.ts'
+import {
+  canFetchMetadata,
+  decodeEntities,
+  oembedEndpoint,
+  placeholderMetadata,
+  textFromEmbedHtml,
+} from '../src/lib/metadata.ts'
 import { addChannel, getAllChannels, getChannels, removeChannel } from '../src/lib/channels.ts'
 
 let passed = 0
@@ -117,14 +124,37 @@ check('dedupe key is form-independent', () => {
   assert.equal(dedupeKey(c), dedupeKey(d))
 })
 
-// --- Non-links ---
-reject('https://example.com/watch?v=dQw4w9WgXcQ')
-reject('https://vimeo.com/12345')
+// --- what parses now, and what still does not ---
+//
+// Any URL is saveable since the generic platform was added: a link the app has
+// not been taught about is still worth keeping. Only input that is not a URL at
+// all is refused.
+check('formerly unknown links are kept rather than refused', () => {
+  const cases: [string, string, string][] = [
+    ['https://example.com/watch?v=dQw4w9WgXcQ', 'link', 'example.com/watch?v=dQw4w9WgXcQ'],
+    ['https://vimeo.com/12345', 'vimeo', '12345'],
+    // A malformed id on a known host is still a working URL, so it is kept as a
+    // plain link rather than thrown away.
+    ['https://open.spotify.com/track/tooshort', 'link', 'open.spotify.com/track/tooshort'],
+    ['https://www.youtube.com/watch?v=short', 'link', 'youtube.com/watch?v=short'],
+  ]
+  for (const [input, platform, id] of cases) {
+    const link = parseLink(input)!
+    assert.equal(link.platform, platform, input)
+    assert.equal(link.id, id, input)
+  }
+})
+
+// A channel URL now parses as a plain link, so the app has to test for channels
+// first — otherwise following a channel would quietly save it as a link.
+check('a YouTube channel URL is a channel first and a link second', () => {
+  assert.equal(looksLikeChannelLink('https://www.youtube.com/@RickAstleyYT'), true)
+  assert.equal(parseLink('https://www.youtube.com/@RickAstleyYT')!.platform, 'link')
+})
+
 reject('just some text')
 reject('')
-reject('https://open.spotify.com/track/tooshort')
-reject('https://www.youtube.com/watch?v=short')
-reject('https://www.youtube.com/@RickAstleyYT')
+reject('   ')
 
 // --- relative time ---
 const NOW = Date.UTC(2026, 0, 15, 12, 0, 0)
@@ -235,7 +265,7 @@ check('rejects files that are not exports', () => {
 check('unreadable entries are counted, not fatal', () => {
   const { items, skipped } = roundTrip([
     libraryItem,
-    { url: 'https://vimeo.com/1' },
+    { url: 'not a url at all' },
     { url: 42 },
     {},
   ])
@@ -431,6 +461,7 @@ check('stats on an empty library are zeroes, not NaN', () => {
   assert.equal(s.firstAddedAt, null)
   assert.equal(s.lastWatchedAt, null)
   assert.deepEqual(s.byKind, [])
+  assert.deepEqual(s.byPlatform, [])
 })
 
 check('stats count platforms, kinds and watched state', () => {
@@ -441,8 +472,10 @@ check('stats count platforms, kinds and watched state', () => {
     statItem({ key: 'd', platform: 'spotify', kind: 'track', watchedAt: 9, addedAt: 300 }),
   ])
   assert.equal(s.total, 4)
-  assert.equal(s.youtube, 2)
-  assert.equal(s.spotify, 2)
+  assert.deepEqual(
+    s.byPlatform.map((p) => [p.label, p.count]),
+    [['YouTube', 2], ['Spotify', 2]]
+  )
   assert.equal(s.watched, 2)
   assert.equal(s.unwatched, 2)
   assert.equal(s.watchedPercent, 50)
@@ -803,6 +836,153 @@ check('unfollowing leaves a stamped tombstone, and following again revives it', 
   assert.ok(revived)
   assert.equal(revived.deletedAt, null)
   assert.equal(getAllChannels().filter((c) => c.id === RICK).length, 1)
+})
+
+// --- the platform registry ---
+const parsed = (input: string) => parseLink(input)!
+
+check('each platform claims its own links and canonicalises them', () => {
+  const cases: [string, string, string, string][] = [
+    ['https://x.com/jack/status/20', 'x', 'post', 'https://x.com/jack/status/20'],
+    ['https://twitter.com/jack/status/20?s=20&t=abc', 'x', 'post', 'https://x.com/jack/status/20'],
+    ['https://mobile.twitter.com/jack', 'x', 'profile', 'https://x.com/jack'],
+    ['https://www.instagram.com/p/CxYz123/?igshid=1', 'instagram', 'post', 'https://www.instagram.com/p/CxYz123/'],
+    ['https://instagram.com/reel/abc123', 'instagram', 'reel', 'https://www.instagram.com/reel/abc123/'],
+    ['https://www.instagram.com/nasa/', 'instagram', 'profile', 'https://www.instagram.com/nasa/'],
+    ['https://www.facebook.com/watch/?v=123456', 'facebook', 'video', 'https://www.facebook.com/watch/?v=123456'],
+    ['https://www.facebook.com/nasa/posts/987', 'facebook', 'post', 'https://www.facebook.com/nasa/posts/987'],
+    ['https://www.threads.net/@zuck/post/C8Xy', 'threads', 'post', 'https://www.threads.net/@zuck/post/C8Xy'],
+    ['https://www.tiktok.com/@scout2015/video/6718335390845095173', 'tiktok', 'video', 'https://www.tiktok.com/@scout2015/video/6718335390845095173'],
+    ['https://www.reddit.com/r/pics/comments/haucpf/a_cat/', 'reddit', 'post', 'https://www.reddit.com/r/pics/comments/haucpf/a_cat/'],
+    ['https://old.reddit.com/r/pics/', 'reddit', 'community', 'https://www.reddit.com/r/pics/'],
+    ['https://soundcloud.com/forss/flickermood', 'soundcloud', 'track', 'https://soundcloud.com/forss/flickermood'],
+    ['https://vimeo.com/22439234', 'vimeo', 'video', 'https://vimeo.com/22439234'],
+    ['https://bsky.app/profile/bsky.app/post/3l6o', 'bluesky', 'post', 'https://bsky.app/profile/bsky.app/post/3l6o'],
+    ['https://www.twitch.tv/videos/106400740', 'twitch', 'video', 'https://www.twitch.tv/videos/106400740'],
+    ['https://example.com/some/article', 'link', 'link', 'https://example.com/some/article'],
+  ]
+  for (const [input, platform, kind, url] of cases) {
+    const link = parsed(input)
+    assert.equal(link.platform, platform, input)
+    assert.equal(link.kind, kind, input)
+    assert.equal(link.url, url, input)
+  }
+})
+
+// The same post shared from two apps carries different tracking junk; without
+// stripping it, one post would become several library items.
+check('tracking parameters do not create duplicates', () => {
+  assert.equal(
+    dedupeKey(parsed('https://example.com/post?utm_source=x&utm_medium=social')),
+    dedupeKey(parsed('https://www.example.com/post'))
+  )
+  assert.equal(
+    dedupeKey(parsed('https://www.instagram.com/p/CxYz123/?igshid=zzz')),
+    dedupeKey(parsed('https://instagram.com/p/CxYz123/'))
+  )
+  assert.equal(
+    dedupeKey(parsed('https://twitter.com/jack/status/20?s=46')),
+    dedupeKey(parsed('https://x.com/jack/status/20'))
+  )
+})
+
+check('a bare word is still not a link', () => {
+  for (const input of ['hello', 'RickAstleyYT', 'just some text', '']) {
+    assert.equal(parseLink(input), null, JSON.stringify(input))
+  }
+})
+
+// Instagram, Facebook, Reddit and unknown sites publish nothing a browser may
+// read, so their titles have to come from the URL itself.
+check('links with no fetchable metadata still get a readable title', () => {
+  const cases: [string, string, string][] = [
+    ['https://www.instagram.com/p/CxYz123/', 'Instagram post', 'Instagram'],
+    ['https://www.instagram.com/reel/abc123', 'Instagram reel', 'Instagram'],
+    ['https://www.instagram.com/nasa/', '@nasa', 'Instagram'],
+    ['https://www.facebook.com/nasa/posts/987', 'Facebook post by nasa', 'Facebook'],
+    ['https://www.reddit.com/r/pics/comments/haucpf/a_very_good_cat/', 'A very good cat', 'r/pics'],
+    ['https://old.reddit.com/r/pics/', 'r/pics', 'Reddit'],
+    ['https://www.threads.net/@zuck/post/C8Xy', 'Post by @zuck', 'Threads'],
+    ['https://x.com/jack/status/20', 'Post by @jack', 'X'],
+    ['https://example.com/some/great-article', 'Great article', 'example.com'],
+  ]
+  for (const [input, title, subtitle] of cases) {
+    const meta = placeholderMetadata(parsed(input))
+    assert.equal(meta.title, title, input)
+    assert.equal(meta.subtitle, subtitle, input)
+  }
+})
+
+check('metadata is only attempted where an endpoint can actually be read', () => {
+  for (const input of [
+    'https://x.com/jack/status/20',
+    'https://vimeo.com/22439234',
+    'https://www.tiktok.com/@a/video/123',
+    'https://soundcloud.com/forss/flickermood',
+    'https://bsky.app/profile/bsky.app/post/3l6o',
+  ]) {
+    assert.equal(canFetchMetadata(parsed(input)), true, input)
+  }
+  for (const input of [
+    'https://www.instagram.com/p/CxYz123/',
+    'https://www.facebook.com/nasa/posts/987',
+    'https://www.reddit.com/r/pics/comments/haucpf/x/',
+    'https://example.com/a',
+    // A profile has no embeddable post, so there is nothing to ask for.
+    'https://x.com/jack',
+  ]) {
+    assert.equal(canFetchMetadata(parsed(input)), false, input)
+  }
+})
+
+check('the oEmbed request carries the canonical url', () => {
+  const endpoint = oembedEndpoint(parsed('https://twitter.com/jack/status/20?s=46'))!
+  assert.ok(endpoint.startsWith('https://publish.x.com/oembed'))
+  assert.ok(endpoint.includes(encodeURIComponent('https://x.com/jack/status/20')))
+})
+
+// X and Bluesky return an empty title: the post's words are inside the embed
+// HTML, so without this a saved post would only ever read "Post by @someone".
+check('post text is recovered from embed html', () => {
+  const html =
+    '<blockquote class="twitter-tweet"><p lang="en" dir="ltr">just setting up my twttr</p>&mdash; jack (@jack)</blockquote>'
+  assert.equal(textFromEmbedHtml(html), 'just setting up my twttr')
+})
+
+check('entities and line breaks survive the unpacking', () => {
+  assert.equal(textFromEmbedHtml('<p>a &amp; b<br>c &#39;d&#39; &mdash; e</p>'), "a & b c 'd' — e")
+  assert.equal(decodeEntities('&#x1F600; &nbsp;ok'), '😀  ok')
+  assert.equal(textFromEmbedHtml(''), '')
+})
+
+check('a very long post is truncated rather than filling the card', () => {
+  const out = textFromEmbedHtml(`<p>${'x'.repeat(300)}</p>`)
+  assert.ok(out.length <= 200)
+  assert.ok(out.endsWith('…'))
+})
+
+check('stats group by platform in registry order', () => {
+  const s = libraryStats([
+    statItem({ key: 'a', platform: 'instagram', kind: 'post' }),
+    statItem({ key: 'b', platform: 'youtube', kind: 'video' }),
+    statItem({ key: 'c', platform: 'link', kind: 'link' }),
+    statItem({ key: 'd', platform: 'youtube', kind: 'video' }),
+  ])
+  assert.deepEqual(
+    s.byPlatform.map((p) => [p.label, p.count]),
+    [['YouTube', 2], ['Instagram', 1], ['Other', 1]]
+  )
+  assert.ok(s.byPlatform.every((p) => p.color.startsWith('#')))
+})
+
+check('every platform has a filter chip, and posts have their own', () => {
+  assert.equal(isFilterId('instagram'), true)
+  assert.equal(isFilterId('link'), true)
+  assert.equal(isFilterId('posts'), true)
+  assert.equal(findFilter('instagram').match(asItem({ platform: 'instagram' })), true)
+  assert.equal(findFilter('instagram').match(asItem({ platform: 'youtube' })), false)
+  assert.equal(findFilter('posts').match(asItem({ kind: 'reel' })), true)
+  assert.equal(findFilter('link').label, 'Other links')
 })
 
 console.log(`${passed} checks passed`)

@@ -941,8 +941,6 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, 0.6); }
 
 .split-legend .dot { width: 9px; height: 9px; border-radius: 50%; }
 
-.split-legend .dot:nth-of-type(2) { margin-left: 10px; }
-
 .kind-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 1px; }
 
 .kind-list li {
@@ -1159,3 +1157,30 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, 0.6); }
   .feed-head { padding: 4px 10px 12px; }
   .feed-status { order: 3; width: 100%; }
 }
+
+/* ---------- platforms without artwork ---------- */
+
+/* Instagram, Facebook, Reddit and plain links publish no thumbnail a browser
+   may read, so their tile carries the platform's initial instead of an image. */
+.thumb.blank {
+  background:
+    radial-gradient(120% 120% at 20% 0%, rgba(255, 255, 255, 0.06), transparent 60%),
+    var(--surface);
+}
+
+.blank-mark {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: clamp(28px, 22%, 64px);
+  font-weight: 800;
+  opacity: 0.55;
+  letter-spacing: -1px;
+}
+
+.grid.layout-rows .blank-mark { font-size: 18px; }
+
+.legend-entry { display: inline-flex; align-items: center; gap: 6px; }
+
+.split-legend { flex-wrap: wrap; gap: 12px; }

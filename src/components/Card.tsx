@@ -1,16 +1,10 @@
 import { kindLabel } from '../lib/links.ts'
+import { platformInfo } from '../lib/platforms.ts'
 import { openItem } from '../lib/open.ts'
 import type { LibraryItem } from '../lib/store.ts'
 import { absoluteTime, relativeTime } from '../lib/time.ts'
 import { CheckIcon, CloseIcon, PlayIcon, UndoIcon } from './Icons'
 
-const PLATFORM = {
-  youtube: { label: 'YouTube', color: 'var(--yt)' },
-  spotify: { label: 'Spotify', color: 'var(--sp)' },
-} as const
-
-/** Spotify serves square cover art; YouTube serves 16:9 stills. */
-const isSquareArt = (item: LibraryItem) => item.platform === 'spotify'
 
 type Props = {
   item: LibraryItem
@@ -19,9 +13,15 @@ type Props = {
 }
 
 export function Card({ item, onRemove, onToggleWatched }: Props) {
-  const platform = PLATFORM[item.platform]
+  const platform = platformInfo(item.platform)
   const initial = (item.subtitle || platform.label).trim().charAt(0).toUpperCase()
   const watched = item.watchedAt !== null
+  // Square artwork (album covers, Instagram posts) is centred over a blurred
+  // copy of itself so every tile keeps the same 16:9 rhythm.
+  const squareArt = Boolean(platform.squareArt)
+  // Nothing to fetch and nothing fetched: show a branded tile rather than a
+  // shimmer that would never resolve.
+  const blank = !item.thumbnail && item.resolved
 
   return (
     <div className={`card-shell ${watched ? 'watched' : ''}`}>
@@ -30,11 +30,20 @@ export function Card({ item, onRemove, onToggleWatched }: Props) {
         onClick={() => openItem(item)}
         aria-label={`Open "${item.title}" in ${platform.label}`}
       >
-        <div className={`thumb ${isSquareArt(item) ? 'square' : ''} ${item.thumbnail ? '' : 'skeleton'}`}>
-          {item.thumbnail && isSquareArt(item) && (
+        <div
+          className={`thumb ${squareArt ? 'square' : ''} ${blank ? 'blank' : ''} ${
+            item.thumbnail || item.resolved ? '' : 'skeleton'
+          }`}
+        >
+          {item.thumbnail && squareArt && (
             <img className="backdrop" src={item.thumbnail} alt="" aria-hidden="true" />
           )}
           {item.thumbnail && <img className="art" src={item.thumbnail} alt="" loading="lazy" />}
+          {blank && (
+            <span className="blank-mark" style={{ color: platform.color }} aria-hidden="true">
+              {platform.label.charAt(0)}
+            </span>
+          )}
           <div className="play">
             <PlayIcon />
           </div>

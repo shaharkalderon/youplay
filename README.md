@@ -14,6 +14,8 @@ opens in the app it came from.
 - **Export / import** your library as JSON, so it survives a cleared cache.
 - **Watched state**, turning the pile into a queue you can actually work through.
 - **Profile page** behind the logo: account, sync, library stats and setup help.
+- **Links from anywhere**: Instagram, Facebook, X, TikTok, Reddit and the rest,
+  alongside YouTube and Spotify.
 - **New from channels**: follow YouTube channels and see their last 2 days of uploads.
 - **No backend, no API keys, no OAuth.** Titles and artwork come from YouTube's
   and Spotify's public oEmbed endpoints, which allow browser CORS. Your library
@@ -47,7 +49,7 @@ npm install && npm run dev
 | `npm run dev` | Dev server on :5173 |
 | `npm run build` | Typecheck + production build to `dist/` |
 | `npm run preview` | Serve the built output |
-| `npm test` | 91 checks: parsing, time, sort, transfer, filters, merge, store, stats, sync codes and the channel feed |
+| `npm test` | 100 checks: platforms, parsing, time, sort, transfer, filters, merge, store, stats, sync codes and the channel feed |
 | `npm run icons` | Regenerate PWA icons |
 
 ## Getting links in
@@ -159,6 +161,53 @@ instructions — which were previously only visible while the library was empty.
 
 The library controls — search, filters, sort and layout — hide while the
 profile is open, since none of them apply to it.
+
+## Links from anywhere
+
+Save a link from any site. Fifteen platforms are recognised by name, and
+anything else is kept as a plain link rather than refused — the app should never
+lose something because it has not been taught about that site.
+
+Recognised: YouTube, Spotify, X, Instagram, Facebook, Threads, TikTok, Reddit,
+SoundCloud, Vimeo, Bluesky, Twitch, LinkedIn and Pinterest. Each one gets its
+own colour, its own filter chip, and canonical URLs — so `twitter.com/…` and
+`x.com/…` are the same item, as are `old.reddit.com` and `www.reddit.com`.
+
+### Titles and artwork
+
+A title can only be fetched where a platform publishes an oEmbed endpoint that
+browsers are allowed to read. That split is not a matter of effort; it is what
+each platform permits:
+
+| | Platforms |
+| --- | --- |
+| Title, author and artwork are fetched | YouTube, Spotify, X, TikTok, Vimeo, SoundCloud, Bluesky |
+| Nothing is readable from a browser | Instagram, Facebook, Threads, Reddit, Pinterest, Twitch, LinkedIn, other sites |
+
+Instagram, Facebook and Threads need a Meta app token — their public endpoints
+were retired in 2020. Reddit, Pinterest, Dailymotion, Mixcloud and Flickr answer
+without CORS headers, so a browser may not read them, and Twitch's endpoint is
+gone.
+
+Those links are still saved, opened and organised normally; their title is
+worked out from the URL instead. An Instagram link reads "Instagram post", a
+Reddit link uses the slug already in its URL ("A very good cat · r/pics"), an X
+profile becomes "@jack", and an unknown link uses its last path segment and
+host. Since there is no artwork either, their cards show a tile in the
+platform's colour rather than a thumbnail that would never load.
+
+X and Bluesky are a special case: they return an empty title, with the post's
+words inside the embed HTML, so the text is unpacked from there.
+
+### Tidying up links
+
+Tracking parameters (`utm_*`, `fbclid`, `igshid`, `si` and friends) are stripped
+before saving, so the same post shared from two different apps is one item
+rather than several.
+
+A YouTube channel URL is deliberately *not* claimed as a link: it is routed to
+[the New feed](#new-from-channels) to be followed. That check has to run before
+link parsing, or following a channel would quietly save it as an ordinary link.
 
 ## New from channels
 
@@ -350,6 +399,7 @@ src/lib/remote.ts       pull / merge / push
 src/lib/synccode.ts     sync code parsing and storage (pure, tested)
 src/lib/syncsession.ts  code ownership and sync scheduling
 src/lib/supabase.ts     RPC helper and config detection
+src/lib/platforms.ts    per-platform parsing, colours and oEmbed endpoints
 src/lib/youtube.ts      YouTube API client and response parsing (parsers tested)
 src/lib/channels.ts     followed channels: storage, follow and unfollow
 src/lib/feed.ts         fetching, caching and the feed window

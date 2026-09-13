@@ -1,4 +1,22 @@
-export type Platform = 'youtube' | 'spotify'
+import { PLATFORMS, platformInfo, spotifyFromUri } from './platforms.ts'
+
+export type Platform =
+  | 'youtube'
+  | 'spotify'
+  | 'x'
+  | 'instagram'
+  | 'facebook'
+  | 'threads'
+  | 'tiktok'
+  | 'reddit'
+  | 'soundcloud'
+  | 'vimeo'
+  | 'bluesky'
+  | 'twitch'
+  | 'linkedin'
+  | 'pinterest'
+  /** Anything the app has not been taught about; still saved and opened. */
+  | 'link'
 
 export type Kind =
   | 'video'
@@ -9,6 +27,12 @@ export type Kind =
   | 'artist'
   | 'show'
   | 'episode'
+  | 'post'
+  | 'reel'
+  | 'photo'
+  | 'profile'
+  | 'community'
+  | 'link'
 
 export type ParsedLink = {
   platform: Platform
@@ -24,19 +48,6 @@ export type ParsedLink = {
   appUri: string | null
 }
 
-const YT_ID = /^[\w-]{11}$/
-const YT_LIST = /^[\w-]{12,}$/
-const SPOTIFY_ID = /^[A-Za-z0-9]{22}$/
-
-const SPOTIFY_KINDS: Record<string, Kind> = {
-  track: 'track',
-  album: 'album',
-  artist: 'artist',
-  playlist: 'playlist',
-  show: 'show',
-  episode: 'episode',
-}
-
 /**
  * Pull the first http(s) or spotify: URL out of arbitrary shared text. Share
  * sheets rarely hand over a bare URL — YouTube sends "Title\nhttps://youtu.be/x"
@@ -49,101 +60,31 @@ export function extractUrl(text: string): string | null {
   return match[0].replace(/[.,;:!?)\]]+$/, '')
 }
 
-function parseSpotifyUri(raw: string): ParsedLink | null {
-  const parts = raw.split(':')
-  if (parts.length < 3) return null
-  const kind = SPOTIFY_KINDS[parts[1].toLowerCase()]
-  const id = parts[2]
-  if (!kind || !SPOTIFY_ID.test(id)) return null
-  return {
-    platform: 'spotify',
-    kind,
-    id,
-    url: `https://open.spotify.com/${kind}/${id}`,
-    appUri: `spotify:${kind}:${id}`,
-  }
-}
-
-function parseYouTube(u: URL): ParsedLink | null {
-  const host = u.hostname.replace(/^www\./, '')
-  const segments = u.pathname.split('/').filter(Boolean)
-
-  // youtu.be/<id>
-  if (host === 'youtu.be') {
-    const id = segments[0]
-    if (id && YT_ID.test(id)) return youtubeVideo(id, 'video')
-    return null
-  }
-
-  if (host !== 'youtube.com' && host !== 'm.youtube.com' && host !== 'music.youtube.com') {
-    return null
-  }
-
-  // /watch?v=<id>, /embed/<id>, /live/<id>, /shorts/<id>
-  const v = u.searchParams.get('v')
-  if (segments[0] === 'watch' && v && YT_ID.test(v)) return youtubeVideo(v, 'video')
-
-  if ((segments[0] === 'shorts' || segments[0] === 'embed' || segments[0] === 'live') && segments[1]) {
-    const id = segments[1]
-    if (YT_ID.test(id)) return youtubeVideo(id, segments[0] === 'shorts' ? 'short' : 'video')
-  }
-
-  // Playlists, either standalone or riding along on a /watch URL.
-  const list = u.searchParams.get('list')
-  if ((segments[0] === 'playlist' || !v) && list && YT_LIST.test(list)) {
-    return {
-      platform: 'youtube',
-      kind: 'playlist',
-      id: list,
-      url: `https://www.youtube.com/playlist?list=${list}`,
-      appUri: null,
-    }
-  }
-
-  return null
-}
-
-function youtubeVideo(id: string, kind: Kind): ParsedLink {
-  return {
-    platform: 'youtube',
-    kind,
-    id,
-    url: kind === 'short' ? `https://www.youtube.com/shorts/${id}` : `https://www.youtube.com/watch?v=${id}`,
-    appUri: `vnd.youtube://${id}`,
-  }
-}
-
-function parseSpotifyUrl(u: URL): ParsedLink | null {
-  if (!/(^|\.)spotify\.com$/.test(u.hostname)) return null
-  // Localised links carry an /intl-de/ style prefix ahead of the real segments.
-  const segments = u.pathname.split('/').filter(Boolean).filter((s) => !/^intl-\w+$/.test(s))
-  const kind = SPOTIFY_KINDS[segments[0]?.toLowerCase()]
-  const id = segments[1]
-  if (!kind || !id || !SPOTIFY_ID.test(id)) return null
-  return {
-    platform: 'spotify',
-    kind,
-    id,
-    url: `https://open.spotify.com/${kind}/${id}`,
-    appUri: `spotify:${kind}:${id}`,
-  }
-}
-
-/** Parse any YouTube or Spotify link (or text containing one) into a canonical record. */
+/**
+ * Parse a link, or text containing one, into a canonical record.
+ *
+ * Each platform gets a look in registry order and the generic handler takes
+ * whatever is left, so saving never fails merely because the app has not been
+ * taught about a site. Only genuinely unusable input returns null.
+ */
 export function parseLink(input: string): ParsedLink | null {
   const raw = extractUrl(input.trim()) ?? input.trim()
   if (!raw) return null
 
-  if (raw.toLowerCase().startsWith('spotify:')) return parseSpotifyUri(raw)
+  if (raw.toLowerCase().startsWith('spotify:')) return spotifyFromUri(raw)
 
-  let u: URL
+  let url: URL
   try {
-    u = new URL(raw.startsWith('http') ? raw : `https://${raw}`)
+    url = new URL(raw.startsWith('http') ? raw : `https://${raw}`)
   } catch {
     return null
   }
 
-  return parseYouTube(u) ?? parseSpotifyUrl(u)
+  for (const platform of PLATFORMS) {
+    const link = platform.parse(url)
+    if (link) return link
+  }
+  return null
 }
 
 export const dedupeKey = (link: ParsedLink) => `${link.platform}:${link.kind}:${link.id}`
@@ -157,6 +98,14 @@ const KIND_LABEL: Record<Kind, string> = {
   artist: 'Artist',
   show: 'Podcast',
   episode: 'Episode',
+  post: 'Post',
+  reel: 'Reel',
+  photo: 'Photo',
+  profile: 'Profile',
+  community: 'Community',
+  link: 'Link',
 }
 
 export const kindLabel = (kind: Kind) => KIND_LABEL[kind]
+
+export const platformLabel = (platform: Platform) => platformInfo(platform).label

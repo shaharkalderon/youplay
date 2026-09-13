@@ -1,4 +1,5 @@
 import { dedupeKey, parseLink } from './links.ts'
+import { canFetchMetadata, placeholderMetadata } from './metadata.ts'
 import type { LibraryItem } from './store.ts'
 
 export const EXPORT_VERSION = 1
@@ -103,10 +104,12 @@ export function parseImport(text: string): ImportOutcome {
     const title = asString(record.title)
     const thumbnail = safeThumbnail(record.thumbnail)
 
+    const placeholder = placeholderMetadata(link)
+
     items.push({
       ...link,
       key,
-      title: title || `${link.kind} · ${link.id}`,
+      title: title || placeholder.title,
       subtitle: asString(record.subtitle, 200),
       thumbnail,
       addedAt: safeTimestamp(record.addedAt),
@@ -115,8 +118,9 @@ export function parseImport(text: string): ImportOutcome {
       // An import brings items in as live entries; tombstones are a sync
       // concern and a backup file should not carry ghosts back.
       deletedAt: null,
-      // Anything without real metadata is re-fetched after the import.
-      resolved: Boolean(title) && Boolean(thumbnail),
+      // Anything without real metadata is re-fetched after the import — unless
+      // the platform has none to fetch, in which case the placeholder is final.
+      resolved: (Boolean(title) && Boolean(thumbnail)) || !canFetchMetadata(link),
       resolving: false,
     })
   }

@@ -60,22 +60,25 @@ export function Profile({ items, sync, onOpenData }: Props) {
 
         {stats.total > 0 && (
           <>
-            <div className="split-bar" role="img"
-              aria-label={`${stats.youtube} from YouTube, ${stats.spotify} from Spotify`}>
-              <span
-                className="split-yt"
-                style={{ flexGrow: stats.youtube || 0 }}
-                hidden={stats.youtube === 0}
-              />
-              <span
-                className="split-sp"
-                style={{ flexGrow: stats.spotify || 0 }}
-                hidden={stats.spotify === 0}
-              />
+            <div
+              className="split-bar"
+              role="img"
+              aria-label={stats.byPlatform.map((p) => `${p.count} from ${p.label}`).join(', ')}
+            >
+              {stats.byPlatform.map((entry) => (
+                <span
+                  key={entry.platform}
+                  style={{ flexGrow: entry.count, background: entry.color }}
+                />
+              ))}
             </div>
             <p className="split-legend">
-              <span className="dot" style={{ background: 'var(--yt)' }} /> YouTube {stats.youtube}
-              <span className="dot" style={{ background: 'var(--sp)' }} /> Spotify {stats.spotify}
+              {stats.byPlatform.map((entry) => (
+                <span key={entry.platform} className="legend-entry">
+                  <span className="dot" style={{ background: entry.color }} />
+                  {entry.label} {entry.count}
+                </span>
+              ))}
             </p>
 
             <ul className="kind-list">

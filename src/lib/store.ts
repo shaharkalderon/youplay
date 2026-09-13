@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import type { ParsedLink } from './links.ts'
 import { dedupeKey } from './links.ts'
-import { fetchMetadata, placeholderMetadata } from './metadata.ts'
+import { canFetchMetadata, fetchMetadata, placeholderMetadata } from './metadata.ts'
 import { liveItems, pruneTombstones } from './sync.ts'
 
 export type LibraryItem = ParsedLink & {
@@ -135,6 +135,10 @@ export function addLink(link: ParsedLink): LibraryItem | null {
   if (existing && !existing.deletedAt) return null
 
   const now = Date.now()
+  // Instagram, Facebook, Reddit and the like publish no metadata a browser may
+  // read, so their placeholder text — worked out from the URL — is final.
+  // Marking them resolved stops the retry pass revisiting them on every load.
+  const lookupPossible = canFetchMetadata(link)
   const item: LibraryItem = {
     ...link,
     key,
@@ -143,11 +147,11 @@ export function addLink(link: ParsedLink): LibraryItem | null {
     watchedAt: null,
     updatedAt: now,
     deletedAt: null,
-    resolved: false,
-    resolving: true,
+    resolved: !lookupPossible,
+    resolving: lookupPossible,
   }
   commit([item, ...items.filter((entry) => entry.key !== key)])
-  void resolve(item)
+  if (lookupPossible) void resolve(item)
   return item
 }
 
@@ -218,7 +222,9 @@ export function removeItem(key: string) {
 export function retryUnresolved() {
   // Trust the in-memory set, not the item flag: a merged-in item can arrive
   // carrying a stale flag from whichever device wrote it.
-  const pending = getItems().filter((item) => !item.resolved && !inFlight.has(item.key))
+  const pending = getItems().filter(
+    (item) => !item.resolved && canFetchMetadata(item) && !inFlight.has(item.key)
+  )
   if (pending.length === 0) return
   pending.forEach((item) => {
     patch(item.key, { resolving: true })
