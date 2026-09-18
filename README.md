@@ -36,6 +36,13 @@ Pushing to `main` runs [`.github/workflows/deploy.yml`](.github/workflows/deploy
 which installs, runs the tests, builds, and publishes `dist/` to GitHub Pages.
 A failing test blocks the deploy.
 
+A pull request runs the same install, test and build and stops there — the
+publishing steps and the whole `deploy` job are gated on the event not being a
+pull request, so a branch can be checked without anything reaching the live
+site. Deploys share one concurrency group and queue behind each other, since
+there is only one Pages site; a check run gets a group per branch and is
+cancelled when you push again.
+
 Because Pages serves the app from `/youplay/` rather than a domain root, the
 subpath is threaded through carefully:
 
