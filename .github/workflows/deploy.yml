@@ -3,6 +3,10 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  # Pull requests run the same install, test and build, but stop short of
+  # publishing. Without this the tests only ran at deploy time, which is after
+  # the decision to merge rather than before it.
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -10,10 +14,15 @@ permissions:
   pages: write
   id-token: write
 
-# Let a running deploy finish rather than cancelling it mid-publish.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  # There is one Pages site, so deploys share a group and queue behind each
+  # other. A pull request is checking a branch rather than publishing, so it
+  # gets a group of its own and does not hold up a deploy.
+  group: >-
+    ${{ github.event_name == 'pull_request' && format('check-{0}', github.ref) || 'pages' }}
+  # Let a running deploy finish rather than cancelling it mid-publish. A check
+  # run has no such problem: a new push makes the one before it irrelevant.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -41,13 +50,19 @@ jobs:
           # YouTube Data API in Google Cloud; it ships in the public bundle.
           VITE_YOUTUBE_API_KEY: ${{ vars.YOUTUBE_API_KEY || secrets.YOUTUBE_API_KEY }}
 
+      # Publishing steps only. A pull request has proved the build compiles,
+      # which is the whole point of running it here.
       - uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request'
+
       - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
         with:
           path: dist
 
   deploy:
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
