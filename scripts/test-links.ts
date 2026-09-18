@@ -4,17 +4,62 @@ import { parseLink, dedupeKey } from '../src/lib/links.ts'
 import { relativeTime } from '../src/lib/time.ts'
 import { sortItems } from '../src/lib/sort.ts'
 import { buildExport, exportFilename, parseImport } from '../src/lib/transfer.ts'
-import { DEFAULT_FILTER, FILTERS, findFilter, isFilterId } from '../src/lib/filters.ts'
+import {
+  DEFAULT_FILTER,
+  FILTERS,
+  filterFolder,
+  filterTag,
+  findFilter,
+  folderFilterId,
+  isFilterId,
+  tagFilterId,
+} from '../src/lib/filters.ts'
+import {
+  addTag,
+  normaliseTag,
+  removeTag,
+  sameTag,
+  sanitiseTags,
+  tagColors,
+  tagCounts,
+  tagHue,
+  MAX_TAGS_PER_ITEM,
+} from '../src/lib/tags.ts'
+import { matchesQuery, searchItems } from '../src/lib/search.ts'
+import {
+  ancestorFolders,
+  buildFolderTree,
+  flattenFolders,
+  folderName,
+  isWithinFolder,
+  normaliseFolderPath,
+  parentFolder,
+  rewriteFolder,
+  sanitiseFolder,
+  MAX_FOLDER_DEPTH,
+} from '../src/lib/folders.ts'
+import { OBJECT_TYPES, countLabel, isObjectTypeId, objectType } from '../src/lib/objects.ts'
 import { mergeItems, mergeRecords, pruneTombstones, liveItems, TOMBSTONE_TTL_MS } from '../src/lib/sync.ts'
 import { libraryStats } from '../src/lib/stats.ts'
 import { isSyncCode, normaliseSyncCode } from '../src/lib/synccode.ts'
 import {
   addLink,
+  editItem,
   getAllItems,
+  getItems,
+  NOTE_LIMIT,
+  replaceAll,
+  deleteFolder,
+  deleteTag,
   removeItem,
+  renameFolder,
   renameItem,
+  renameTag,
+  setFolder,
   stripTransient,
+  tagItem,
   toggleWatched,
+  untagItem,
 } from '../src/lib/store.ts'
 import {
   looksLikeChannelLink,
@@ -33,6 +78,7 @@ import {
   textFromEmbedHtml,
 } from '../src/lib/metadata.ts'
 import { addChannel, getAllChannels, getChannels, removeChannel } from '../src/lib/channels.ts'
+import { frontmatter } from './import-capacities.ts'
 
 let passed = 0
 const check = (name: string, fn: () => void) => {
@@ -295,6 +341,33 @@ check('spoofed identity fields are re-derived from the url', () => {
   assert.equal(items[0].key, 'youtube:video:dQw4w9WgXcQ')
 })
 
+check('a backup carries your own writing, cleaned on the way back in', () => {
+  const { items } = roundTrip([
+    { ...libraryItem, note: 'Read before Thursday', tags: ['#Ideas', 'ideas'], folder: '/Work/' },
+  ])
+  assert.equal(items[0].note, 'Read before Thursday')
+  // Re-cleaned rather than trusted: the file may have been hand-edited.
+  assert.deepEqual(items[0].tags, ['Ideas'])
+  assert.equal(items[0].folder, 'Work')
+})
+
+check('an export from before notes, tags and folders still imports', () => {
+  const { items } = roundTrip([libraryItem])
+  assert.equal(items[0].note, '')
+  assert.deepEqual(items[0].tags, [])
+  assert.equal(items[0].folder, null)
+})
+
+check('unusable notes, tags and folders are dropped, not fatal', () => {
+  const { items } = roundTrip([
+    { ...libraryItem, note: 42, tags: 'Ideas', folder: ['Work'] },
+  ])
+  assert.equal(items.length, 1, 'the item still imports')
+  assert.equal(items[0].note, '')
+  assert.deepEqual(items[0].tags, [])
+  assert.equal(items[0].folder, null)
+})
+
 check('hostile thumbnails are dropped', () => {
   for (const thumbnail of ['javascript:alert(1)', 'data:text/html,<script>', 'not a url', 12]) {
     const { items } = roundTrip([{ ...libraryItem, thumbnail }])
@@ -330,6 +403,280 @@ check('content filters match their kinds', () => {
   assert.equal(matches('podcasts', asItem({ kind: 'episode' })), true)
   assert.equal(matches('playlists', asItem({ kind: 'playlist' })), true)
   assert.equal(matches('spotify', asItem({ platform: 'spotify' })), true)
+})
+
+// --- tags ---
+
+check('a typed tag is cleaned into its stored form', () => {
+  assert.equal(normaliseTag('  Stocks  '), 'Stocks')
+  assert.equal(normaliseTag('#Stocks'), 'Stocks')
+  assert.equal(normaliseTag('###Stocks'), 'Stocks')
+  // Case is preserved: a tag is a name, not a slug.
+  assert.equal(normaliseTag('iDeas'), 'iDeas')
+  assert.equal(normaliseTag('trading   journal'), 'trading journal')
+  assert.equal(normaliseTag('   '), null)
+  assert.equal(normaliseTag('#'), null)
+  assert.equal(normaliseTag('x'.repeat(80))!.length, 32)
+})
+
+check('tags match case-insensitively but keep their spelling', () => {
+  assert.equal(sameTag('Stocks', 'stocks'), true)
+  assert.equal(sameTag('Stocks', 'stock'), false)
+  const tags = addTag(['Ideas'], 'ideas')
+  assert.deepEqual(tags, ['Ideas'], 'a differently-cased duplicate is rejected')
+})
+
+check('adding a tag returns the same array when nothing changed', () => {
+  const tags = ['Stocks']
+  // Identity, not just equality: callers skip the write and the sync stamp.
+  assert.equal(addTag(tags, 'stocks'), tags)
+  assert.equal(addTag(tags, '   '), tags)
+  assert.equal(addTag(tags, '#'), tags)
+  assert.notEqual(addTag(tags, 'Music'), tags)
+})
+
+check('a tag list is capped', () => {
+  let tags: string[] = []
+  for (let i = 0; i < MAX_TAGS_PER_ITEM + 5; i++) tags = addTag(tags, `tag${i}`)
+  assert.equal(tags.length, MAX_TAGS_PER_ITEM)
+})
+
+check('removing a tag is case-insensitive', () => {
+  assert.deepEqual(removeTag(['Ideas', 'Music'], 'ideas'), ['Music'])
+  assert.deepEqual(removeTag(['Ideas'], 'nothing'), ['Ideas'])
+})
+
+check('tags from an untrusted file are cleaned, not trusted', () => {
+  assert.deepEqual(sanitiseTags(['#a', 'a', 'A', ' b ', 42, null, '']), ['a', 'b'])
+  assert.deepEqual(sanitiseTags('Stocks'), [])
+  assert.deepEqual(sanitiseTags(undefined), [])
+  assert.equal(sanitiseTags(Array(40).fill(0).map((_, i) => `t${i}`)).length, MAX_TAGS_PER_ITEM)
+})
+
+check('tag counts merge spellings and show the most common one', () => {
+  const counts = tagCounts([
+    { tags: ['Ideas'] },
+    { tags: ['Ideas'] },
+    { tags: ['ideas', 'Music'] },
+    { tags: ['Music'] },
+  ])
+  assert.deepEqual(counts, [
+    { tag: 'Ideas', count: 3 },
+    { tag: 'Music', count: 2 },
+  ])
+})
+
+check('equal tag counts are ordered alphabetically, not by chance', () => {
+  const counts = tagCounts([{ tags: ['Zebra', 'Apple'] }])
+  assert.deepEqual(counts.map((entry) => entry.tag), ['Apple', 'Zebra'])
+})
+
+check('an empty library has no tags', () => {
+  assert.deepEqual(tagCounts([]), [])
+  assert.deepEqual(tagCounts([{ tags: [] }]), [])
+})
+
+check('a tag colour is stable and case-insensitive', () => {
+  assert.equal(tagHue('Stocks'), tagHue('stocks'))
+  assert.ok(tagHue('Stocks') >= 0 && tagHue('Stocks') < 360)
+  assert.deepEqual(tagColors('Stocks'), tagColors('STOCKS'))
+  assert.notEqual(tagColors('Stocks').color, tagColors('Music').color)
+  // A very long name must not overflow the running hash into a negative hue.
+  assert.ok(tagHue('x'.repeat(500)) >= 0)
+})
+
+// --- tag filters ---
+
+check('a tag filter round-trips through its id', () => {
+  const id = tagFilterId('Trading Journal')
+  assert.equal(filterTag(id), 'Trading Journal')
+  assert.equal(filterTag('all'), null)
+  assert.equal(filterTag('unwatched'), null)
+})
+
+check('a tag filter matches case-insensitively', () => {
+  const filter = findFilter(tagFilterId('ideas'))
+  assert.equal(filter.match(asItem({ tags: ['Ideas'] })), true)
+  assert.equal(filter.match(asItem({ tags: ['Music'] })), false)
+  assert.equal(filter.match(asItem({ tags: [] })), false)
+  assert.equal(filter.label, 'ideas')
+})
+
+check('tag filter ids survive the remembered-filter check', () => {
+  assert.equal(isFilterId(tagFilterId('Stocks')), true)
+  // A bare prefix names no tag, so it must not be restored from storage.
+  assert.equal(isFilterId('tag:'), false)
+  assert.equal(isFilterId('nonsense'), false)
+  assert.equal(isFilterId(7), false)
+})
+
+// --- search ---
+
+const searchable = asItem({
+  title: 'Deadlift form breakdown',
+  subtitle: 'Alan Thrall',
+  note: 'Watch before Thursday',
+  tags: ['Bodybuilding'],
+  url: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+}) as never as Parameters<typeof matchesQuery>[0]
+
+check('search reaches titles, notes, tags and the link itself', () => {
+  assert.equal(matchesQuery(searchable, 'deadlift'), true, 'title')
+  assert.equal(matchesQuery(searchable, 'thrall'), true, 'subtitle')
+  assert.equal(matchesQuery(searchable, 'thursday'), true, 'note')
+  assert.equal(matchesQuery(searchable, 'bodybuilding'), true, 'tag')
+  assert.equal(matchesQuery(searchable, 'aqz-ke'), true, 'url')
+  assert.equal(matchesQuery(searchable, 'squat'), false)
+})
+
+check('an empty query matches everything', () => {
+  assert.equal(matchesQuery(searchable, ''), true)
+  const other = asItem({ title: 'Other', note: '', tags: [] }) as never
+  assert.equal(searchItems([searchable, other] as never, '   ').length, 2)
+  assert.equal(searchItems([searchable, other] as never, 'deadlift').length, 1)
+})
+
+// --- object types ---
+
+check('the object type registry answers for what it holds', () => {
+  assert.equal(isObjectTypeId('weblink'), true)
+  assert.equal(isObjectTypeId('book'), false)
+  assert.equal(objectType('weblink').label, 'Weblinks')
+  // An unknown id falls back rather than crashing a screen.
+  assert.equal(objectType('nope' as never).id, OBJECT_TYPES[0].id)
+})
+
+check('counts read as English on both sides of one', () => {
+  const type = objectType('weblink')
+  assert.equal(countLabel(type, 1), '1 weblink')
+  assert.equal(countLabel(type, 0), '0 weblinks')
+  assert.equal(countLabel(type, 4), '4 weblinks')
+})
+
+// --- folder paths ---
+
+check('a typed folder path is cleaned into its stored form', () => {
+  assert.equal(normaliseFolderPath('Work'), 'Work')
+  assert.equal(normaliseFolderPath('/Work/'), 'Work')
+  assert.equal(normaliseFolderPath('  Work / Research  '), 'Work/Research')
+  assert.equal(normaliseFolderPath('Work//Research'), 'Work/Research')
+  assert.equal(normaliseFolderPath('deep  spaces'), 'deep spaces')
+  assert.equal(normaliseFolderPath('   '), null)
+  assert.equal(normaliseFolderPath('///'), null)
+  assert.equal(normaliseFolderPath(''), null)
+})
+
+check('a folder path is capped in depth and in segment length', () => {
+  const deep = normaliseFolderPath('a/b/c/d/e/f/g') as string
+  assert.equal(deep.split('/').length, MAX_FOLDER_DEPTH)
+  assert.equal(normaliseFolderPath('x'.repeat(80))!.length, 32)
+})
+
+check('folder paths from an untrusted file are cleaned, not trusted', () => {
+  assert.equal(sanitiseFolder('/Work/'), 'Work')
+  assert.equal(sanitiseFolder(42), null)
+  assert.equal(sanitiseFolder(null), null)
+  assert.equal(sanitiseFolder(['Work']), null)
+})
+
+check('a path knows its own name, parent and ancestors', () => {
+  assert.equal(folderName('Work/Research'), 'Research')
+  assert.equal(folderName('Work'), 'Work')
+  assert.equal(parentFolder('Work/Research'), 'Work')
+  assert.equal(parentFolder('Work'), null)
+  assert.deepEqual(ancestorFolders('a/b/c'), ['a', 'a/b', 'a/b/c'])
+})
+
+check('containment stops at a separator, so Work does not claim Workshop', () => {
+  assert.equal(isWithinFolder('Work/Research', 'Work'), true)
+  assert.equal(isWithinFolder('Work', 'Work'), true)
+  assert.equal(isWithinFolder('work/research', 'WORK'), true, 'case-insensitive')
+  assert.equal(isWithinFolder('Workshop', 'Work'), false)
+  assert.equal(isWithinFolder('Work', 'Work/Research'), false)
+})
+
+check('renaming rewrites a path and everything under it', () => {
+  assert.equal(rewriteFolder('Work/Research', 'Work', 'Archive'), 'Archive/Research')
+  assert.equal(rewriteFolder('Work', 'Work', 'Archive'), 'Archive')
+  // Not inside the renamed folder: the caller skips the write.
+  assert.equal(rewriteFolder('Workshop', 'Work', 'Archive'), null)
+  assert.equal(rewriteFolder('Other', 'Work', 'Archive'), null)
+})
+
+// --- the folder tree ---
+
+const filed = (...folders: (string | null)[]) => folders.map((folder) => ({ folder }))
+
+check('the tree implies the ancestors nothing sits in directly', () => {
+  const tree = buildFolderTree(filed('Work/Research'))
+  assert.equal(tree.length, 1)
+  assert.equal(tree[0].path, 'Work')
+  assert.equal(tree[0].direct, 0, 'nothing is filed in Work itself')
+  assert.equal(tree[0].total, 1, 'but one thing is inside it')
+  assert.equal(tree[0].children[0].path, 'Work/Research')
+  assert.equal(tree[0].children[0].direct, 1)
+})
+
+check('a folder counts everything below it, not just its own', () => {
+  const tree = buildFolderTree(filed('Work', 'Work/Research', 'Work/Research', 'Other', null))
+  const work = tree.find((node) => node.path === 'Work')!
+  assert.equal(work.direct, 1)
+  assert.equal(work.total, 3)
+  assert.equal(work.children[0].total, 2)
+  assert.equal(tree.find((node) => node.path === 'Other')!.total, 1)
+})
+
+check('one folder spelled several ways stays one folder', () => {
+  const tree = buildFolderTree(filed('Work', 'Work', 'work'))
+  assert.equal(tree.length, 1)
+  // The majority spelling wins, so one stray "work" cannot rename the rest.
+  assert.equal(tree[0].path, 'Work')
+  assert.equal(tree[0].total, 3)
+})
+
+check('empty folders appear but never outvote a real spelling', () => {
+  const tree = buildFolderTree(filed('Work'), ['work/Ideas', 'Reading list'])
+  const paths = flattenFolders(tree).map((node) => node.path)
+  assert.deepEqual(paths, ['Reading list', 'Work', 'Work/Ideas'])
+  assert.equal(flattenFolders(tree).find((n) => n.path === 'Reading list')!.total, 0)
+})
+
+check('the tree is alphabetical at every level', () => {
+  const tree = buildFolderTree(filed('B/z', 'B/a', 'A'))
+  assert.deepEqual(flattenFolders(tree).map((node) => node.path), ['A', 'B', 'B/a', 'B/z'])
+})
+
+check('an unfiled library has no folders', () => {
+  assert.deepEqual(buildFolderTree(filed(null, null)), [])
+  assert.deepEqual(buildFolderTree([]), [])
+})
+
+// --- folder filters ---
+
+check('a folder filter round-trips through its id', () => {
+  assert.equal(filterFolder(folderFilterId('Work/Research')), 'Work/Research')
+  assert.equal(filterFolder(tagFilterId('Work')), null)
+  assert.equal(filterFolder('all'), null)
+  assert.equal(filterTag(folderFilterId('Work')), null, 'a folder id is not a tag id')
+})
+
+check('opening a folder shows what is inside its subfolders too', () => {
+  const filter = findFilter(folderFilterId('Work'))
+  assert.equal(filter.match(asItem({ folder: 'Work' })), true)
+  assert.equal(filter.match(asItem({ folder: 'Work/Research' })), true)
+  assert.equal(filter.match(asItem({ folder: 'Workshop' })), false)
+  assert.equal(filter.match(asItem({ folder: null })), false)
+})
+
+check('unfiled is the complement of every folder', () => {
+  assert.equal(findFilter('unfiled').match(asItem({ folder: null })), true)
+  assert.equal(findFilter('unfiled').match(asItem({ folder: 'Work' })), false)
+})
+
+check('folder filter ids survive the remembered-filter check', () => {
+  assert.equal(isFilterId(folderFilterId('Work')), true)
+  assert.equal(isFilterId('folder:'), false)
+  assert.equal(isFilterId('unfiled'), true)
 })
 
 check('only known filter ids are accepted from storage', () => {
@@ -578,6 +925,219 @@ check('removing tombstones and stamps rather than dropping the row', () => {
   assert.equal(after.updatedAt, after.deletedAt)
 })
 
+// --- notes and tags on the store ---
+
+const fresh = (url: string) => {
+  const item = addLink(parseLink(url)!)
+  assert.ok(item, `expected ${url} to be fresh`)
+  return item
+}
+
+check('a new item starts with no note and no tags', () => {
+  const item = fresh('https://youtu.be/aqz-KE-bpKQ')
+  assert.equal(item.note, '')
+  assert.deepEqual(item.tags, [])
+})
+
+check('editing saves title, note and tags under one stamp', () => {
+  const item = fresh('https://youtu.be/jNQXAC9IVRw')
+  editItem(item.key, { title: 'Me at the zoo', note: 'The first one', tags: ['History'] })
+  const after = getItems().find((i) => i.key === item.key)!
+  assert.equal(after.title, 'Me at the zoo')
+  assert.equal(after.note, 'The first one')
+  assert.deepEqual(after.tags, ['History'])
+  // A title you typed is protected from a later lookup, like a rename.
+  assert.equal(after.resolved, true)
+  assert.ok(after.updatedAt >= item.updatedAt)
+})
+
+check('an edit that changes nothing does not stamp one', () => {
+  const item = getItems().find((i) => i.id === 'jNQXAC9IVRw')!
+  const before = item.updatedAt
+  editItem(item.key, { title: item.title, note: item.note, tags: [...item.tags] })
+  assert.equal(getItems().find((i) => i.key === item.key)!.updatedAt, before)
+})
+
+check('an empty title leaves the existing one alone', () => {
+  const item = getItems().find((i) => i.id === 'jNQXAC9IVRw')!
+  editItem(item.key, { title: '   ', note: 'still here' })
+  const after = getItems().find((i) => i.key === item.key)!
+  assert.equal(after.title, 'Me at the zoo')
+  assert.equal(after.note, 'still here')
+})
+
+check('an edit cleans its tags rather than trusting them', () => {
+  const item = getItems().find((i) => i.id === 'jNQXAC9IVRw')!
+  editItem(item.key, { tags: ['#Ideas', 'ideas', '  ', 'Music'] })
+  assert.deepEqual(getItems().find((i) => i.key === item.key)!.tags, ['Ideas', 'Music'])
+})
+
+check('a note is capped so one runaway paste cannot fill storage', () => {
+  const item = getItems().find((i) => i.id === 'jNQXAC9IVRw')!
+  editItem(item.key, { note: 'n'.repeat(NOTE_LIMIT + 500) })
+  assert.equal(getItems().find((i) => i.key === item.key)!.note.length, NOTE_LIMIT)
+})
+
+check('tagging and untagging one item stamps the edit', () => {
+  const item = fresh('https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT')
+  tagItem(item.key, '#Music')
+  const tagged = getItems().find((i) => i.key === item.key)!
+  assert.deepEqual(tagged.tags, ['Music'])
+  assert.ok(tagged.updatedAt >= item.updatedAt)
+
+  // A duplicate is a no-op, so it must not stamp an edit that would then win a
+  // merge against a real one made elsewhere.
+  const before = tagged.updatedAt
+  tagItem(item.key, 'music')
+  assert.equal(getItems().find((i) => i.key === item.key)!.updatedAt, before)
+
+  untagItem(item.key, 'MUSIC')
+  assert.deepEqual(getItems().find((i) => i.key === item.key)!.tags, [])
+})
+
+check('renaming a tag rewrites every item carrying it', () => {
+  const a = getItems().find((i) => i.id === 'jNQXAC9IVRw')!
+  const b = fresh('https://youtu.be/8aGhZQkoFbQ')
+  editItem(b.key, { tags: ['ideas'] })
+
+  renameTag('Ideas', '#Thinking')
+
+  const tags = (id: string) => getItems().find((i) => i.id === id)!.tags
+  assert.ok(tags('jNQXAC9IVRw').includes('Thinking'), 'the renamed tag lands')
+  assert.ok(!tags('jNQXAC9IVRw').some((t) => t.toLowerCase() === 'ideas'), 'the old one goes')
+  assert.deepEqual(tags('8aGhZQkoFbQ'), ['Thinking'], 'a different spelling is caught too')
+  // Other tags on the same item are untouched.
+  assert.ok(tags('jNQXAC9IVRw').includes('Music'))
+  assert.ok(a.key.length > 0)
+})
+
+check('renaming a tag to nothing is refused', () => {
+  const before = getItems().find((i) => i.id === 'jNQXAC9IVRw')!.tags
+  renameTag('Thinking', '  #  ')
+  assert.deepEqual(getItems().find((i) => i.id === 'jNQXAC9IVRw')!.tags, before)
+})
+
+// --- folders on the store ---
+
+check('a new item is unfiled', () => {
+  assert.equal(fresh('https://vimeo.com/76979871').folder, null)
+})
+
+check('filing and unfiling stamp the edit', () => {
+  const item = fresh('https://youtu.be/9bZkp7q19f0')
+  setFolder(item.key, '/Work/Research/')
+  const filed = getItems().find((i) => i.key === item.key)!
+  // Stored in its cleaned form, not as typed.
+  assert.equal(filed.folder, 'Work/Research')
+  assert.ok(filed.updatedAt >= item.updatedAt)
+
+  // Filing it where it already is changes nothing, so it must not stamp an
+  // edit that would then win a merge against a real one elsewhere.
+  const before = filed.updatedAt
+  setFolder(item.key, 'Work/Research')
+  assert.equal(getItems().find((i) => i.key === item.key)!.updatedAt, before)
+
+  setFolder(item.key, null)
+  assert.equal(getItems().find((i) => i.key === item.key)!.folder, null)
+})
+
+check('an unusable folder path unfiles nothing by accident', () => {
+  const item = getItems().find((i) => i.id === '9bZkp7q19f0')!
+  setFolder(item.key, 'Keep')
+  setFolder(item.key, '   ')
+  // '   ' names no folder, so it reads as null and the item is unfiled - the
+  // same as clearing it. What must not happen is a folder literally named '   '.
+  assert.equal(getItems().find((i) => i.key === item.key)!.folder, null)
+})
+
+check('editing can file an item, and null means unfile rather than untouched', () => {
+  const item = getItems().find((i) => i.id === '9bZkp7q19f0')!
+  editItem(item.key, { folder: 'Inbox' })
+  assert.equal(getItems().find((i) => i.key === item.key)!.folder, 'Inbox')
+  // Leaving folder out of the edit must not clear it.
+  editItem(item.key, { note: 'untouched' })
+  assert.equal(getItems().find((i) => i.key === item.key)!.folder, 'Inbox')
+  editItem(item.key, { folder: null })
+  assert.equal(getItems().find((i) => i.key === item.key)!.folder, null)
+})
+
+check('renaming a folder carries its subfolders along', () => {
+  const parent = fresh('https://soundcloud.com/artist/track-one')
+  const child = fresh('https://vimeo.com/148751763')
+  setFolder(parent.key, 'Work')
+  setFolder(child.key, 'Work/Research')
+
+  const stored = renameFolder('Work', '/Archive/')
+  // The stored path, not the typed one: the caller points its filter at this,
+  // and following the raw text would land on a folder nothing is in.
+  assert.equal(stored, 'Archive')
+
+  const folderOf = (id: string) => getItems().find((i) => i.id === id)!.folder
+  assert.equal(folderOf(parent.id), 'Archive')
+  assert.equal(folderOf(child.id), 'Archive/Research')
+})
+
+check('renaming a folder leaves a similarly-named one alone', () => {
+  const other = fresh('https://vimeo.com/22439234')
+  setFolder(other.key, 'Archived notes')
+  renameFolder('Archive', 'Done')
+  assert.equal(getItems().find((i) => i.key === other.key)!.folder, 'Archived notes')
+})
+
+check('renaming a folder to nothing is refused', () => {
+  const before = getItems().map((i) => i.folder)
+  assert.equal(renameFolder('Done', '  /  '), null)
+  assert.deepEqual(getItems().map((i) => i.folder), before)
+})
+
+check('deleting a folder unfiles its contents and keeps them', () => {
+  const before = getItems().length
+  const inside = getItems().filter((i) => i.folder && i.folder.startsWith('Done'))
+  assert.ok(inside.length >= 2, 'expected the folder and a subfolder to have items')
+
+  deleteFolder('Done')
+
+  assert.equal(getItems().length, before, 'a folder is a place, not a container')
+  for (const item of inside) {
+    assert.equal(getItems().find((i) => i.key === item.key)!.folder, null)
+  }
+})
+
+check('deleting a tag removes it from every item and nothing else', () => {
+  const a = fresh('https://vimeo.com/108018156')
+  const b = fresh('https://soundcloud.com/artist/track-two')
+  editItem(a.key, { tags: ['Keep', 'Drop'] })
+  editItem(b.key, { tags: ['Drop'] })
+
+  deleteTag('drop')
+
+  assert.deepEqual(getItems().find((i) => i.key === a.key)!.tags, ['Keep'])
+  assert.deepEqual(getItems().find((i) => i.key === b.key)!.tags, [])
+  assert.equal(getItems().length > 0, true, 'items are never removed with a tag')
+})
+
+check('renaming a tag hands back the name it stored', () => {
+  const item = fresh('https://vimeo.com/17853047')
+  editItem(item.key, { tags: ['Draft'] })
+  assert.equal(renameTag('draft', '  #Final  '), 'Final')
+  assert.deepEqual(getItems().find((i) => i.key === item.key)!.tags, ['Final'])
+  assert.equal(renameTag('Final', '#'), null, 'a name that cleans to nothing is refused')
+  assert.deepEqual(getItems().find((i) => i.key === item.key)!.tags, ['Final'])
+})
+
+check('a merged-in item from an older version is filled in, not left broken', () => {
+  // A device still on the previous version pushes rows with no note or tags.
+  // Anything that reads them — searching, the tag rail — would otherwise throw.
+  const legacy = getAllItems().map(({ note: _n, tags: _t, folder: _f, ...rest }) => rest)
+  replaceAll(legacy as never)
+  for (const item of getItems()) {
+    assert.equal(typeof item.note, 'string', `${item.key} lost its note`)
+    assert.ok(Array.isArray(item.tags), `${item.key} lost its tags`)
+    assert.equal(item.folder, null, `${item.key} has no usable folder`)
+  }
+  assert.equal(searchItems(getItems(), 'zzz-no-match').length, 0)
+})
+
 check('transient resolving state is never part of the synced payload', () => {
   const stripped = stripTransient([
     { key: 'k', resolving: true, title: 't' } as never,
@@ -810,6 +1370,52 @@ check('channel merge: a true tie resolves the same way on both devices', () => {
 check('channel merge keeps the earliest follow date', () => {
   const merged = mergeRecords([record('a', { addedAt: T + 99, updatedAt: T + 99 })], [record('a')])
   assert.equal(merged[0].addedAt, T)
+})
+
+// --- reading a Capacities export ---
+//
+// The frontmatter these files carry is YAML-shaped but hand-parsed, because a
+// real YAML dependency for a one-off conversion is not worth it. These pin the
+// four shapes the export actually uses - and the folded block especially, which
+// spans lines and silently reads as ">-" if you match a single line.
+
+const fm = (body: string) => frontmatter(`---\n${body}\n---\n`)
+
+check('frontmatter reads plain and quoted scalars', () => {
+  const fields = fm("type: 'Weblink'\ndomain: youtube.com\ncategory: null\ntopic:")!
+  assert.equal(fields.type, 'Weblink')
+  assert.equal(fields.domain, 'youtube.com')
+  assert.equal(fields.category, null, 'an explicit null is a null')
+  assert.equal(fields.topic, null, 'so is an empty value')
+})
+
+check('frontmatter folds a >- block into one line', () => {
+  const fields = fm(
+    "description: >-\n  Enjoy the videos and music you love, upload original\n  content, and share it.\nurl: https://youtu.be/abc"
+  )!
+  assert.equal(
+    fields.description,
+    'Enjoy the videos and music you love, upload original content, and share it.'
+  )
+  // The key after the block must not be swallowed by it.
+  assert.equal(fields.url, 'https://youtu.be/abc')
+})
+
+check('frontmatter keeps the newlines in a literal block', () => {
+  const fields = fm('note: |-\n  first\n  second\nurl: x')!
+  assert.equal(fields.note, 'first\nsecond')
+  assert.equal(fields.url, 'x')
+})
+
+check('frontmatter reads an inline list', () => {
+  assert.deepEqual(fm('tags: [Chest, JeffNippard]')!.tags, ['Chest', 'JeffNippard'])
+  assert.deepEqual(fm("tags: ['A', \"B\"]")!.tags, ['A', 'B'])
+  assert.deepEqual(fm('tags: []')!.tags, [])
+})
+
+check('a file without frontmatter is refused rather than half-read', () => {
+  assert.equal(frontmatter('# Just a heading\n'), null)
+  assert.equal(frontmatter('---\nunterminated: true\n'), null)
 })
 
 // --- followed-channels store ---

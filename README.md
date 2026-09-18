@@ -2,24 +2,33 @@
 
 **Live: https://shaharkalderon.github.io/youplay/**
 
-Your YouTube and Spotify links in one YouTube-style library. Tap anything and it
-opens in the app it came from.
+A second brain for everything you find online. Throw a link at it from anywhere,
+and it lands somewhere with a name, your notes on it, and your tags.
 
-- **Aggregates** both platforms into a single grid — videos, Shorts, playlists,
-  tracks, albums, artists, podcasts and episodes.
+The shape is a workspace: a sidebar of **object types** on the left, and the type
+you are in on the right. Today there is one type — **Weblinks** — and the app is
+built so the next one is a registry entry plus a view, not a rewrite.
+
+- **A workspace shell** — sidebar with your object types, tags and search;
+  collapsible on desktop, a drawer on a phone.
+- **Weblinks**, the first object type: videos, Shorts, playlists, tracks, albums,
+  artists, podcasts, episodes, posts and plain links, from any site.
+- **Three views per type** — Overview (the type at a glance), All (the list),
+  and New (uploads from channels you follow).
+- **An object page** for every item: your note, its tags, where it is filed, and
+  what else in your library is related to it.
+- **Notes and tags** on every item, searched along with everything else.
+- **Folders** — one home per item, nested as deep as you like, alongside tags.
 - **Share straight from the source app** via the PWA share target.
-- **Paste anywhere** — Cmd/Ctrl+V on the library saves the link, no dialog needed.
+- **Paste anywhere** — Cmd/Ctrl+V saves the link, no dialog needed.
 - **Four layouts** — grid, compact, list and dense rows — remembered per device.
 - **Sort by date added**, newest or oldest first, also remembered.
-- **Export / import** your library as JSON, so it survives a cleared cache.
+- **Export / import** as JSON, notes and tags included, so it survives a cleared cache.
 - **Watched state**, turning the pile into a queue you can actually work through.
-- **Profile page** behind the logo: account, sync, library stats and setup help.
-- **Links from anywhere**: Instagram, Facebook, X, TikTok, Reddit and the rest,
-  alongside YouTube and Spotify.
-- **New from channels**: follow YouTube channels and see their last 2 days of uploads.
-- **No backend, no API keys, no OAuth.** Titles and artwork come from YouTube's
-  and Spotify's public oEmbed endpoints, which allow browser CORS. Your library
-  lives in `localStorage` on your device.
+- **Sync across devices** with a code, last-write-wins with tombstones.
+- **No backend, no API keys, no OAuth** for the core. Titles and artwork come
+  from public oEmbed endpoints that allow browser CORS. Everything lives in
+  `localStorage` on your device unless you turn sync on.
 
 ## Deployment
 
@@ -49,7 +58,7 @@ npm install && npm run dev
 | `npm run dev` | Dev server on :5173 |
 | `npm run build` | Typecheck + production build to `dist/` |
 | `npm run preview` | Serve the built output |
-| `npm test` | 108 checks: platforms, parsing, previews, time, sort, transfer, filters, merge, store, stats, sync codes and the channel feed |
+| `npm test` | 164 checks: platforms, parsing, previews, time, sort, transfer, filters, tags, folders, search, object types, merge, store, stats, sync codes and the channel feed |
 | `npm run icons` | Regenerate PWA icons |
 
 ## Getting links in
@@ -79,6 +88,198 @@ surrounding text.
 Paste is deliberately conservative. It never fires while you are typing in the
 search box or the dialog, and pasting ordinary text stays silent — you only get
 a warning when the clipboard held something URL-shaped that we could not place.
+
+## The workspace
+
+The sidebar is the app's spine. Top to bottom:
+
+- **The workspace name**, which you can rename in place — click the pencil, type,
+  Enter. It is a label on *your* view and nothing more: the app, its manifest and
+  its installed name stay "YouPlay", so renaming can never strand an installed
+  PWA or break the share target. It is stored per device and deliberately not
+  synced — renaming on a phone should not rename a laptop.
+- **New** and **Search**.
+- **Object types**, from the registry in `src/lib/objects.ts`, each with its
+  folders nested under it as a tree you can expand and collapse, and **Unfiled**
+  at the end once anything is filed. Folders belong to a type, so they hang off
+  it rather than sitting in a section of their own — with one type that is a
+  small difference, with four it is the difference between a rail you can read
+  and a flat list of everything you have ever made. The `+` on a type's row
+  makes a folder in it. Counts are on hover rather than on the row, so the tree
+  reads as names.
+- **Tags**, most-used first, with counts. Clicking one filters the list.
+- **Tags & folders**, **Profile & sync** and **Export / import** at the bottom.
+
+It collapses on desktop (the panel button, remembered per device) and becomes a
+drawer under 900px, behind the hamburger in the top bar. That top bar only exists
+when the sidebar is not in the layout — on a phone always, on desktop only once
+you have hidden it — so there is always a way back.
+
+### Object types
+
+`src/lib/objects.ts` is the registry of what this brain can hold. Only `weblink`
+is in it today, but every screen reads the label, icon, colour and blurb from
+there rather than hard-coding "Weblinks", and `TypeHeader` is written against the
+registry entry rather than against links. The module is free of React and browser
+imports, like the other pure modules, so it is exercised straight from the tests.
+
+A type's page has three tabs:
+
+| Tab | What it is |
+| --- | --- |
+| **Overview** | The type at a glance: totals, the oldest items in your queue, what you saved most recently, your tags, and where it all comes from. Everything on it is a way *into* the list. |
+| **All** | The list, with the filter chips, sort and layout controls. |
+| **New** | Uploads from YouTube channels you follow. Only offered once it can do something — an API key, or channels already followed. |
+
+The tab is remembered per device and falls back to **All** if the remembered one
+is no longer offered.
+
+## The object page
+
+Clicking anything opens its own page. This is where a saved link stops being a
+bookmark: the fetched title and artwork are the smaller half of it, and the
+note, the tags and the folder are yours.
+
+It holds the artwork, an editable title, what the thing is and when you saved
+it, a prominent **Open in {platform}** button, your note, its tags, its folder,
+and a **Related** strip of everything sharing a tag or a folder with it —
+which is how one saved thing leads to the next.
+
+### What a card click does
+
+A card is two controls, not one:
+
+| Where you click | What happens |
+| --- | --- |
+| **The artwork** | Opens the link in YouTube, Spotify or wherever it came from. |
+| **The text** | Opens the item's own page in the app. |
+
+That split is why the card is a `<div>` holding two `<button>`s rather than one
+button — HTML forbids nesting one inside another — and it is why the layout
+rules are written against `.card`, `.thumb` and `.meta` rather than against the
+element that happens to be clickable. Both buttons carry their own accessible
+name: *Open "…" in YouTube* and *Open the page for "…"*.
+
+Watching something and reading what you thought about it are two different
+intentions, and a queue you have to detour through a page to play is a worse
+queue. The hover overlay on the artwork is the play affordance for the first;
+everything else on the card leads to the second.
+
+**Everything saves as you leave the field.** There is no Save button, because
+there is nothing to submit — a button would only invent a way to lose work by
+navigating away. Tags and the folder commit the moment you change them; the
+title and note commit on blur. The page is keyed on the item, so its draft state
+can never belong to a different object than the one on screen.
+
+**Back is a real Back.** Opening an object pushes a history entry, so the
+phone's back gesture closes the page instead of closing the app, and the
+in-app Back button and the system one are the same gesture. Objects stack:
+open three through Related and Back walks you through them rather than dumping
+you at the list. The page is layered *over* whichever section you were in, so
+closing it returns you to the list, tag, folder or search you came from.
+
+If the item goes away underneath you — deleted here, or removed on another
+device and pulled in by a sync — the page closes itself through that same
+gesture rather than sitting there showing nothing.
+
+## Notes and tags
+
+A note is the point of the whole thing: the link is what the internet says, the
+note is what *you* say. Items carrying one show a small **Note** marker on the
+card, with the text on hover. Notes are capped at 4000 characters so one runaway
+paste cannot blow the `localStorage` quota and take the library down with it.
+
+Title, note and tags can also be written in one go through `editItem`, which
+saves them under a single `updatedAt` stamp — three separate writes would be
+three stamps and three chances for a sync landing mid-edit to merge a
+half-written item. An edit that changes nothing does not stamp one at all, so it
+can never win a merge against a real edit made elsewhere.
+
+Tags are stored on the item rather than in a registry of their own, so a tag
+exists the moment something uses it and is gone when nothing does — no orphan
+list to garbage-collect, and nothing extra for sync to reconcile.
+
+- **Case is preserved, matching is not.** "Israel" should read as a name, not a
+  slug. Typing `stocks` therefore lands on your existing `Stocks` rather than
+  forking it. Where one tag has been spelled several ways, the sidebar shows the
+  most common spelling — one stray `stocks` must not rename the `Stocks` you have
+  used twenty times — while each card keeps the words you actually typed.
+- **A leading `#` is accepted and dropped**, because that is how people type tags.
+- **Twelve per item**, thirty-two characters each.
+- **Colours are derived from the name**, so a tag looks the same on every device
+  and every reload without storing anything. Hand-picked colours would be one
+  more thing to sync, and a tag you have not opened yet would have none.
+
+Tag filters are spelled `tag:Stocks` and are ordinary `FilterId`s, so the
+remembered-filter preference and the stale-filter fallback work on them with no
+special case. A slice you have opened names itself in a **context bar** above the
+list, with its count and the two things you might want to do to it: **Rename**
+and **Delete**. Both live there rather than in a menu on the sidebar row, because
+that is where you can see what you are about to change — and on a phone there is
+nowhere sensible to put a popover.
+
+Renaming hands back the name that was actually *stored*, not the one you typed:
+`#Thinking` is stored as `Thinking`, and pointing the filter at the raw text
+would land on a tag nobody carries and an empty screen that reads like data loss.
+
+In the dense **Rows** layout tags sit at the end of the line, before the hover
+controls. On a phone they are dropped there along with the channel line — a chip
+wide enough to read would leave the title as two letters, and the title is what
+you scan a row by. The other three layouts keep them.
+
+## Folders
+
+Tags say what something is *about*; a folder says where it *lives*. An item
+carries any number of tags and sits in at most one folder, and the two are meant
+to be used together.
+
+A folder is a **path**, `Work/Research`, nested up to four levels deep. Opening
+one shows everything inside it *and* inside its subfolders — a folder you have to
+open four times before you see anything is not a folder. Containment stops at a
+separator, so `Work` never claims `Workshop`.
+
+### Why there is no folder registry
+
+The tree is **derived from the paths items carry**, exactly as the tag list is
+derived from the tags in use. Nothing keeps a list of folders.
+
+A registry would need its own synced table, its own RPCs and a SQL migration —
+the followed-channels store already carries that wart, and a second one is worse
+— plus orphan handling for a folder deleted while another device still has items
+in it. Deriving the tree means folders sync for free inside the library that
+already syncs, and a folder can never disagree with its contents.
+
+The one thing derivation cannot express is an **empty** folder: a path no item
+uses does not exist. Since "make a folder, then fill it" is a normal way to work,
+`src/lib/draftfolders.ts` holds those — per device, not synced, and gone the
+moment something real is filed there. An empty folder made on a phone appearing
+on a laptop that has no use for it would be worse than the gap. They show in the
+tree marked *empty*, and they never outvote a real folder's spelling.
+
+### What the operations do
+
+| Action | What happens |
+| --- | --- |
+| **File** | From the object page's folder picker, or `+ New folder` in it. |
+| **New folder** | The `+` beside the sidebar heading. It exists here immediately and becomes real for every device as soon as something is filed in it. |
+| **Rename** | From the context bar. Carries the subfolders along — renaming `Work` moves `Work/Research` to `Archive/Research`, or half the tree would be orphaned under a name that no longer exists. |
+| **Delete** | Unfiles what was inside and keeps it. A folder is a place, not a container that owns its contents, so deleting one loses the filing rather than the things. It says so before you confirm: "Unfile 4 items?" |
+
+Case is preserved and matching is case-insensitive, like tags, and the canonical
+spelling is resolved **segment by segment down the tree** — otherwise an empty
+`work/Ideas` would hang a child spelled `work` under a parent spelled `Work`, the
+same folder wearing two names in one tree.
+
+## Search
+
+**Search** in the sidebar is a workspace-wide screen rather than a filter on one
+list. With a single object type it looks much like the list, which is the point:
+when a second type arrives, this is already the screen that spans them.
+
+It searches **titles, channel names, your notes, your tags and the URL** — the
+URL because the platforms that publish no title are exactly the ones whose
+address is the only thing you might remember. The same matcher backs the search
+box in the type header, so both boxes find the same things.
 
 ## Layouts
 
@@ -118,15 +319,16 @@ rather than opening on a blank screen that would read as data loss.
 **The app opens on Unwatched** — the queue — so finished items stop competing
 for attention. Nothing is lost: **All** and **Watched** are one click away, and
 watched items keep their artwork and titles rather than being archived out of
-sight. To open on the full library instead, change the initial `filterId` in
-`src/App.tsx` from `'unwatched'` to `'all'`.
+sight. To open on the full library instead, change `DEFAULT_FILTER` in
+`src/lib/filters.ts` from `'unwatched'` to `'all'`.
 
 ## Sorting
 
-The button at the right of the filter row toggles between **Newest first** (the
-default) and **Oldest first**, sorting on when you saved the link. It is pinned
-beside the chips rather than inside them, so it stays reachable when the filter
-strip scrolls. Items saved in the same millisecond break ties on their key, so
+The button in the type's toolbar toggles between **Newest first** (the default)
+and **Oldest first**, sorting on when you saved the link. It sits in the tab row
+beside the layout switcher rather than inside the chip strip, so it stays
+reachable when the chips scroll — and it is hidden on **Overview**, which is not
+a list and has nothing to sort. Items saved in the same millisecond break ties on their key, so
 the order never shuffles between renders. The choice persists per device.
 
 ## How opening works
@@ -152,15 +354,16 @@ rather than nothing.
 
 ## Profile
 
-Clicking the **YouPlay logo** opens your profile and clicking it again goes
-back. It gathers everything that is about *you* rather than about browsing:
+**Profile & sync** at the foot of the sidebar — or the workspace name itself —
+opens your profile. It gathers everything that is about *you* rather than about
+browsing:
 who you are signed in as, sync status and controls, what the library contains
 (totals, queue progress, a YouTube/Spotify split, a breakdown by kind, and when
 you first and last saved something), export/import, and the share-sheet setup
 instructions — which were previously only visible while the library was empty.
 
-The library controls — search, filters, sort and layout — hide while the
-profile is open, since none of them apply to it.
+The type header and its controls — search, tabs, filters, sort and layout — are
+not rendered while the profile is open, since none of them apply to it.
 
 ## Links from anywhere
 
@@ -373,6 +576,51 @@ ping-pong.
 The `anon` key is safe to publish — it is designed to ship in client code and
 grants only what the schema above allows. Never put the `service_role` key here.
 
+## Importing from Capacities
+
+```bash
+node scripts/import-capacities.ts "<export folder>" youplay-import.json
+```
+
+Point it at the folder holding `Weblinks/`, `Books/`, `Quotes/` and the rest.
+It reads `Weblinks/*.md` and writes a file you load through **Export / import**
+in the app. Only weblinks are read; the other object types have no home here yet.
+
+| Capacities | YouPlay |
+| --- | --- |
+| `url` | The link, re-parsed into its canonical form |
+| `title` | The title — unless it is scraper junk, see below |
+| `description` | Your note, unless it is boilerplate, see below |
+| `tags` | Tags |
+| `collections` | The folder. Capacities allows several; the first becomes the folder and the rest become tags, so a second membership is still findable |
+| `createdAt` | When you saved it |
+| `previewImage` | Dropped, see below |
+
+Three judgement calls are worth knowing about:
+
+- **Junk titles are thrown away.** The export has 27 items called "- YouTube",
+  ten called "Untitled" and a handful called "Login • Instagram" — all scraper
+  misses. Dropping them lets the app fetch the real title on first load, and a
+  placeholder worked out from the URL beats a name that is wrong.
+- **Boilerplate descriptions are thrown away.** "Enjoy the videos and music you
+  love…" is on every YouTube link in the export; it describes the *platform*,
+  not the item, and 200 identical notes would make the Note marker meaningless.
+  The rule is frequency rather than a list of known blurbs: a description
+  appearing on three or more items is about the site, not the thing.
+- **Preview images are dropped.** They are presigned S3 URLs with a 12-hour
+  expiry, so importing them would fill the library with tiles that go blank the
+  same day. Leaving the thumbnail empty marks the item unresolved instead, and
+  the app fetches a real, durable thumbnail on first load.
+
+Nothing in the export is trusted beyond the link itself. Every URL goes back
+through the app's own parser, so an imported item is one the app could have
+created by saving that link, and two spellings of the same link collapse into
+one entry exactly as they would on paste.
+
+Items whose metadata cannot be fetched — a deleted video, one with embedding
+turned off, a private one — keep whatever title the export had and are retried
+on each load, since a video can come back.
+
 ## Export and import
 
 The download icon in the header opens **Library data**.
@@ -424,8 +672,14 @@ src/lib/metadata.ts   oEmbed lookups + graceful fallbacks
 src/lib/store.ts      localStorage library, dedupe, retry
 src/lib/layout.ts     grid / compact / list definitions
 src/lib/sort.ts       sort order + comparator (pure, tested)
-src/lib/filters.ts    filter definitions + predicates (pure, tested)
-src/lib/preferences.ts  localStorage-backed layout and sort stores
+src/lib/filters.ts    filter definitions + predicates, tag filters (pure, tested)
+src/lib/objects.ts    the object type registry (pure, tested)
+src/lib/tags.ts       tag cleaning, counting and colours (pure, tested)
+src/lib/folders.ts    folder paths, the derived tree, containment (pure, tested)
+src/lib/draftfolders.ts  empty folders, per device and unsynced
+src/lib/navigation.ts    sections, and the object stack wired to browser history
+src/lib/search.ts     what a query is matched against (pure, tested)
+src/lib/preferences.ts  localStorage-backed layout, sort, tab, sidebar and workspace stores
 src/lib/time.ts       relative + absolute timestamps
 src/lib/transfer.ts   export envelope + defensive import parsing
 src/lib/sync.ts       merge, tombstones, pruning (pure, tested)
