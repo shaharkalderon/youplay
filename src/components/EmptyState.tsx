@@ -32,10 +32,11 @@ export function EmptyState({ filtered, queueCleared, onShowAll }: Props) {
 
   return (
     <div className="empty">
-      <h2>Your library is empty</h2>
+      <h2>Nothing saved yet</h2>
       <p>
-        YouPlay holds YouTube and Spotify links side by side. Tapping one hands off to the
-        app it came from. Here is how to get links in:
+        Weblinks is where anything you find online lands — a video, a track, a post, an
+        article. Give each one a note and a few tags and it becomes findable months later.
+        Tapping one hands off to the app it came from. Here is how to get links in:
       </p>
       <Setup />
     </div>

@@ -1,6 +1,8 @@
 import { dedupeKey, parseLink } from './links.ts'
 import { canFetchMetadata, placeholderMetadata } from './metadata.ts'
-import type { LibraryItem } from './store.ts'
+import { NOTE_LIMIT, type LibraryItem } from './store.ts'
+import { sanitiseTags } from './tags.ts'
+import { sanitiseFolder } from './folders.ts'
 
 export const EXPORT_VERSION = 1
 
@@ -114,6 +116,12 @@ export function parseImport(text: string): ImportOutcome {
       thumbnail,
       addedAt: safeTimestamp(record.addedAt),
       watchedAt: safeWatchedAt(record.watchedAt),
+      // Your own writing is the one thing an export exists to protect, so it is
+      // carried through — but capped and re-cleaned like everything else, since
+      // the file may have been hand-edited.
+      note: asString(record.note, NOTE_LIMIT),
+      tags: sanitiseTags(record.tags),
+      folder: sanitiseFolder(record.folder),
       updatedAt: safeTimestamp(record.updatedAt),
       // An import brings items in as live entries; tombstones are a sync
       // concern and a backup file should not carry ghosts back.

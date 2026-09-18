@@ -5,3 +5,9 @@ dist
 tsconfig.tsbuildinfo
 .env
 .env.local
+
+# Your own library and anything derived from it. A Capacities export is 300-odd
+# files of personal reading; an import file is the same data in one JSON. Neither
+# belongs in a public repo, and both are regenerable.
+Second Brain/
+youplay-import.json

@@ -3,6 +3,8 @@ import type { ParsedLink } from './links.ts'
 import { dedupeKey } from './links.ts'
 import { canFetchMetadata, fetchMetadata, placeholderMetadata } from './metadata.ts'
 import { platformInfo } from './platforms.ts'
+import { addTag, hasTag, normaliseTag, removeTag, sanitiseTags } from './tags.ts'
+import { isWithinFolder, normaliseFolderPath, rewriteFolder, sanitiseFolder } from './folders.ts'
 import { liveItems, pruneTombstones } from './sync.ts'
 
 export type LibraryItem = ParsedLink & {
@@ -17,6 +19,23 @@ export type LibraryItem = ParsedLink & {
    * "recently watched" view has something to sort on.
    */
   watchedAt: number | null
+  /**
+   * Your own words about this item — why you saved it, what to do with it. The
+   * link is what the internet says; this is what you say, which is the whole
+   * point of keeping a second brain rather than a bookmark folder.
+   */
+  note: string
+  /** Free-form labels, cross-cutting the platform and kind filters. See tags.ts. */
+  tags: string[]
+  /**
+   * Where this lives: a folder path like `Work/Research`, or null for unfiled.
+   *
+   * One folder per item, on purpose. Tags already cover "this belongs to several
+   * things at once"; a folder answers the different question of where you would
+   * go looking for it. The folder tree is derived from these paths — see
+   * folders.ts for why there is no registry.
+   */
+  folder: string | null
   /** Stamped on every local mutation; drives last-write-wins when syncing. */
   updatedAt: number
   /**
@@ -35,6 +54,15 @@ export type LibraryItem = ParsedLink & {
 
 const STORAGE_KEY = 'youplay.library.v1'
 
+/** Long enough for a real thought, short enough that one runaway paste cannot
+ *  blow the localStorage quota and take the whole library down with it. */
+export const NOTE_LIMIT = 4000
+
+/** Order-sensitive, because the order tags were added in is the order they are
+ *  shown in — reordering is a real edit, not a no-op. */
+const sameTagList = (a: string[], b: string[]) =>
+  a.length === b.length && a.every((tag, index) => tag === b[index])
+
 let items: LibraryItem[] = load()
 const listeners = new Set<() => void>()
 
@@ -50,6 +78,28 @@ const listeners = new Set<() => void>()
  */
 const inFlight = new Set<string>()
 
+/**
+ * Fills in fields an item may predate.
+ *
+ * Applied on every way in, not just on load: a merge can hand us an item pushed
+ * by a device still running an older version, which has no `note` or `tags` at
+ * all. Anything that then reads `item.note.toLowerCase()` — searching, say —
+ * would throw, and one stale device would take the whole screen down.
+ */
+function hydrate(item: LibraryItem): LibraryItem {
+  return {
+    ...item,
+    watchedAt: item.watchedAt ?? null,
+    note: typeof item.note === 'string' ? item.note : '',
+    // Re-cleaned rather than trusted: the list may come from a file that was
+    // hand-edited, or from a version with a different idea of what a tag is.
+    tags: sanitiseTags(item.tags),
+    folder: sanitiseFolder(item.folder),
+    updatedAt: item.updatedAt ?? item.addedAt ?? Date.now(),
+    deletedAt: item.deletedAt ?? null,
+  }
+}
+
 function load(): LibraryItem[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -57,12 +107,8 @@ function load(): LibraryItem[] {
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
     // A lookup that was in flight when the tab closed is not "in flight" now.
-    // The sync fields are backfilled for libraries saved before they existed.
     const restored = parsed.map((item: LibraryItem) => ({
-      ...item,
-      watchedAt: item.watchedAt ?? null,
-      updatedAt: item.updatedAt ?? item.addedAt ?? Date.now(),
-      deletedAt: item.deletedAt ?? null,
+      ...hydrate(item),
       resolving: false,
       // Items saved before the second line carried the URL still repeat the
       // platform's own name, which identifies nothing. Recomputed only where
@@ -122,8 +168,9 @@ export const getAllItems = () => stripTransient(items)
  *  reconciled local and remote state. */
 export function replaceAll(next: LibraryItem[]) {
   // Incoming items describe the library, not this tab, so the flag is rebuilt
-  // from what is genuinely running here.
-  commit(next.map((item) => ({ ...item, resolving: inFlight.has(item.key) })))
+  // from what is genuinely running here — and anything a device on an older
+  // version left out is filled in before the UI ever reads it.
+  commit(next.map((item) => ({ ...hydrate(item), resolving: inFlight.has(item.key) })))
   // A merge can bring in items from another device that never resolved there.
   retryUnresolved()
 }
@@ -154,6 +201,9 @@ export function addLink(link: ParsedLink): LibraryItem | null {
     ...placeholderMetadata(link),
     addedAt: now,
     watchedAt: null,
+    note: '',
+    tags: [],
+    folder: null,
     updatedAt: now,
     deletedAt: null,
     resolved: !lookupPossible,
@@ -234,6 +284,153 @@ export function renameItem(key: string, title: string) {
   const trimmed = title.trim().slice(0, 200)
   if (!trimmed) return
   patch(key, { title: trimmed, resolved: true, resolving: false }, true)
+}
+
+/**
+ * Saves everything the item sheet can change in one stamp.
+ *
+ * Title, note and tags are edited together, so they commit together: three
+ * separate writes would be three `updatedAt` stamps, three renders and — worse
+ * — three chances for a sync mid-edit to merge a half-saved item.
+ *
+ * An empty title is ignored rather than rejected: clearing the field and saving
+ * means "leave the title alone", not "call this item nothing".
+ */
+export function editItem(
+  key: string,
+  changes: { title?: string; note?: string; tags?: string[]; folder?: string | null }
+) {
+  const item = items.find((entry) => entry.key === key)
+  if (!item) return
+
+  const title = changes.title?.trim().slice(0, 200)
+  const note = changes.note?.slice(0, NOTE_LIMIT)
+  const tags = changes.tags ? sanitiseTags(changes.tags) : undefined
+  // `undefined` means "not part of this edit"; `null` means "unfile it", which
+  // is a real change and must not be confused with the first.
+  const folder =
+    changes.folder === undefined
+      ? undefined
+      : changes.folder === null
+        ? null
+        : normaliseFolderPath(changes.folder)
+
+  const next: Partial<LibraryItem> = {}
+  // A title you typed yourself counts as resolved, so no later lookup can
+  // quietly replace your words — the same contract as renaming.
+  if (title && title !== item.title) Object.assign(next, { title, resolved: true, resolving: false })
+  if (note !== undefined && note !== item.note) next.note = note
+  if (tags && !sameTagList(tags, item.tags)) next.tags = tags
+  if (folder !== undefined && folder !== item.folder) next.folder = folder
+
+  // Nothing actually changed — opening the sheet and closing it again should
+  // not stamp an edit that then wins a merge against a real one elsewhere.
+  if (Object.keys(next).length === 0) return
+  patch(key, next, true)
+}
+
+/** Adds a tag straight from a card, without opening the sheet. */
+export function tagItem(key: string, raw: string) {
+  const item = items.find((entry) => entry.key === key)
+  if (!item) return
+  const tags = addTag(item.tags, raw)
+  // `addTag` hands back the same array when the tag was a duplicate or blank.
+  if (tags === item.tags) return
+  patch(key, { tags }, true)
+}
+
+/** Removes a tag from one item. The tag itself disappears once nothing uses it. */
+export function untagItem(key: string, tag: string) {
+  const item = items.find((entry) => entry.key === key)
+  if (!item) return
+  const tags = removeTag(item.tags, tag)
+  if (tags.length === item.tags.length) return
+  patch(key, { tags }, true)
+}
+
+/**
+ * Renames a tag everywhere at once. One `updatedAt` per touched item, so the
+ * rename survives a merge item by item rather than as an all-or-nothing batch.
+ *
+ * Returns the name actually stored, which is not what was typed: `#Thinking`
+ * is stored as `Thinking`. Callers need that to follow the rename — pointing a
+ * filter at the raw text lands on a tag nobody carries and an empty screen.
+ */
+export function renameTag(from: string, to: string): string | null {
+  const tag = normaliseTag(to)
+  if (!tag) return null
+  const now = Date.now()
+  let changed = false
+  const next = items.map((item) => {
+    if (!hasTag(item.tags, from)) return item
+    changed = true
+    return { ...item, tags: addTag(removeTag(item.tags, from), tag), updatedAt: now }
+  })
+  if (changed) commit(next)
+  return tag
+}
+
+/** Drops a tag from every item that carries it. The tag then stops existing,
+ *  because a tag is only ever the set of things using it. */
+export function deleteTag(tag: string) {
+  const now = Date.now()
+  let changed = false
+  const next = items.map((item) => {
+    if (!hasTag(item.tags, tag)) return item
+    changed = true
+    return { ...item, tags: removeTag(item.tags, tag), updatedAt: now }
+  })
+  if (changed) commit(next)
+}
+
+/** Files an item, or unfiles it when given null. */
+export function setFolder(key: string, path: string | null) {
+  const item = items.find((entry) => entry.key === key)
+  if (!item) return
+  const folder = path === null ? null : normaliseFolderPath(path)
+  if (folder === item.folder) return
+  patch(key, { folder }, true)
+}
+
+/**
+ * Renames a folder, carrying everything inside it along.
+ *
+ * Renaming `Work` to `Archive` has to move `Work/Research` to
+ * `Archive/Research` as well, or half the tree is orphaned under a name that no
+ * longer exists. One stamp per touched item, so the move survives a merge item
+ * by item rather than all-or-nothing.
+ */
+export function renameFolder(from: string, to: string): string | null {
+  const path = normaliseFolderPath(to)
+  if (!path) return null
+  const now = Date.now()
+  let changed = false
+  const next = items.map((item) => {
+    if (!item.folder) return item
+    const moved = rewriteFolder(item.folder, from, to)
+    if (!moved || moved === item.folder) return item
+    changed = true
+    return { ...item, folder: moved, updatedAt: now }
+  })
+  if (changed) commit(next)
+  return path
+}
+
+/**
+ * Deletes a folder and everything below it, unfiling what was inside.
+ *
+ * Items are never removed with the folder. A folder is a place, not a container
+ * that owns its contents — deleting one should lose the filing, not the things.
+ */
+export function deleteFolder(path: string) {
+  const now = Date.now()
+  let changed = false
+  const next = items.map((item) => {
+    if (!item.folder || !isWithinFolder(item.folder, path)) return item
+    changed = true
+    return { ...item, folder: null, updatedAt: now }
+  })
+  if (changed) commit(next)
 }
 
 /** Soft delete: the tombstone is what lets the removal survive a sync. */
